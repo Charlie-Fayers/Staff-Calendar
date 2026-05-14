@@ -684,38 +684,24 @@
 // CONFIGURATION — edit these to match your environment
 // ═══════════════════════════════════════════════════════════
 const CONFIG = {
-  // SharePoint list URL (REST API endpoint for the cached calendar list)
+  // SharePoint list URL for cached calendar events
   calendarListUrl: 'https://clarksonwoods.sharepoint.com/sites/Data/_api/web/lists/getbytitle(\'StaffCalendarCache\')/items',
 
-  // SharePoint won projects workbook (loaded via SharePoint REST or a small
-  // Azure Function proxy — see SETUP.md for how to expose this as JSON)
-  projectsApiUrl: 'https://clarksonwoods.sharepoint.com/sites/Data/_api/web/lists/getbytitle(\'WonProjects\')/items',
+  // SharePoint Staff list — "All CW Staff" on CWField site (columns: Title, Email)
+  staffListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'All CW Staff\')/items?$select=Title,Email&$top=500&$orderby=Title asc',
 
   // Set to true when running against the real SharePoint API
   useLiveData: false,
-
-  // Staff members & their assigned colours
-  staff: [
-    { name: 'Tom',      color: '#4a6741' },
-    { name: 'Harry',    color: '#c4703a' },
-    { name: 'Polly',    color: '#6b5fa0' },
-    { name: 'Henry',    color: '#2e7d9e' },
-    { name: 'Frankie',  color: '#b05070' },
-    { name: 'Sarah R',  color: '#8b6914' },
-    { name: 'Joel',     color: '#3a7a6a' },
-    { name: 'Toby',     color: '#7a4030' },
-    { name: 'Molly',    color: '#5a6a3a' },
-    { name: 'Charlie',  color: '#4a5a8a' },
-    { name: 'Charlie D',color: '#7a8040' },
-    { name: 'Miranda',  color: '#8a4060' },
-    { name: 'Bex',      color: '#3a6a8a' },
-    { name: 'Chris',    color: '#6a5030' },
-    { name: 'Pete',     color: '#5a3a7a' },
-    { name: 'Hannah',   color: '#7a4a50' },
-    { name: 'Jo',       color: '#3a7a50' },
-    { name: 'Will',     color: '#6a7a30' },
-  ]
 };
+
+// Palette of distinct colours assigned to staff in load order
+const COLOUR_PALETTE = [
+  '#4a6741','#c4703a','#6b5fa0','#2e7d9e','#b05070',
+  '#8b6914','#3a7a6a','#7a4030','#5a6a3a','#4a5a8a',
+  '#7a8040','#8a4060','#3a6a8a','#6a5030','#5a3a7a',
+  '#7a4a50','#3a7a50','#6a7a30','#a05020','#306a6a',
+  '#7a3a8a','#4a7a30','#8a7030','#305a8a','#6a3050',
+];
 
 // ═══════════════════════════════════════════════════════════
 // DEMO DATA — replaced by live SharePoint data in production
@@ -749,18 +735,33 @@ const DEMO_EVENTS = [
 let currentWeekStart = getWeekStart(new Date());
 let allEvents = [];
 let filteredEvents = [];
-let activeStaff = new Set(CONFIG.staff.map(s => s.name));
+let staffList = [];
+let activeStaff = new Set();
 let currentView = 'map';
 let map, markers = [], markerLayer;
+
+// Demo staff — used when useLiveData is false
+const DEMO_STAFF = [
+  'Tom','Harry','Polly','Henry','Frankie','Sarah R',
+  'Joel','Toby','Molly','Charlie','Charlie D','Miranda',
+  'Bex','Chris','Pete','Hannah','Jo','Will'
+].map((name, i) => ({
+  name,
+  email: name.toLowerCase().replace(' ','.') + '@clarksonwoods.co.uk',
+  color: COLOUR_PALETTE[i % COLOUR_PALETTE.length]
+}));
 
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initMap();
-  buildStaffFilter();
   updateWeekLabel();
-  loadData();
+  document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading staff list\u2026';
+  showLoading(true);
+  await loadStaff();
+  buildStaffFilter();
+  await loadData();
 });
 
 function initMap() {
@@ -772,10 +773,40 @@ function initMap() {
   markerLayer = L.layerGroup().addTo(map);
 }
 
+// ═══════════════════════════════════════════════════════════
+// STAFF LOADING
+// ═══════════════════════════════════════════════════════════
+async function loadStaff() {
+  if (CONFIG.useLiveData) {
+    try {
+      const res = await fetch(CONFIG.staffListUrl, {
+        headers: { 'Accept': 'application/json;odata=verbose' },
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error(`Staff list error ${res.status}`);
+      const data = await res.json();
+      staffList = data.d.results
+        .filter(r => r.Title && r.Email)
+        .map((r, i) => ({
+          name:  r.Title,
+          email: r.Email,
+          color: COLOUR_PALETTE[i % COLOUR_PALETTE.length]
+        }));
+      showNotification(`Loaded ${staffList.length} staff members`, 'ok');
+    } catch(e) {
+      showNotification('Could not load staff list — using demo staff', 'error');
+      staffList = DEMO_STAFF;
+    }
+  } else {
+    staffList = DEMO_STAFF;
+  }
+  activeStaff = new Set(staffList.map(s => s.name));
+}
+
 function buildStaffFilter() {
   const container = document.getElementById('staffFilter');
   container.innerHTML = '';
-  CONFIG.staff.forEach(s => {
+  staffList.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'staff-chip active';
     chip.textContent = s.name;
@@ -811,9 +842,9 @@ function toggleStaff(name, chip, color) {
 }
 
 function selectAllStaff() {
-  CONFIG.staff.forEach(s => activeStaff.add(s.name));
+  staffList.forEach(s => activeStaff.add(s.name));
   document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
-    const color = CONFIG.staff.find(s => s.name === chip.dataset.name)?.color || '#999';
+    const color = staffList.find(s => s.name === chip.dataset.name)?.color || '#999';
     chip.classList.add('active');
     chip.style.backgroundColor = color + '22';
   });
@@ -825,6 +856,7 @@ function selectAllStaff() {
 // ═══════════════════════════════════════════════════════════
 async function loadData() {
   showLoading(true);
+  document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading calendar data…';
   try {
     if (CONFIG.useLiveData) {
       allEvents = await fetchSharePointData();
@@ -1102,7 +1134,7 @@ function updateWeekLabel() {
 }
 
 function staffColor(name) {
-  return CONFIG.staff.find(s => s.name === name)?.color || '#888';
+  return staffList.find(s => s.name === name)?.color || '#888';
 }
 
 function groupByDate(events) {
