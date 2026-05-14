@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staff Whereabouts — Clarkson Woods</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  :root {
+    --ink: #1a1a18;
+    --paper: #f5f2eb;
+    --sage: #4a6741;
+    --sage-light: #6b8f62;
+    --clay: #c4703a;
+    --clay-light: #e8956a;
+    --mist: #e8e4da;
+    --rule: #d4cfc3;
+    --text-secondary: #6b6760;
+    --white: #ffffff;
+    --map-height: calc(100vh - 240px);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Instrument Sans', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    border-bottom: 2px solid var(--sage);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  .brand {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.02em;
+    color: var(--paper);
+  }
+
+  .brand span {
+    color: var(--sage-light);
+  }
+
+  .header-subtitle {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: #888;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .sync-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    background: transparent;
+    border: 1px solid #444;
+    color: #aaa;
+    padding: 0.35rem 0.75rem;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .sync-btn:hover { border-color: var(--sage-light); color: var(--sage-light); }
+  .sync-btn.syncing { animation: pulse-border 1s infinite; }
+
+  @keyframes pulse-border {
+    0%, 100% { border-color: #444; color: #aaa; }
+    50% { border-color: var(--sage-light); color: var(--sage-light); }
+  }
+
+  .last-sync {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: #555;
+  }
+
+  /* ── CONTROL BAR ── */
+  .controls {
+    background: var(--mist);
+    border-bottom: 1px solid var(--rule);
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .week-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .week-nav button {
+    background: var(--white);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    width: 28px;
+    height: 28px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .week-nav button:hover { background: var(--ink); color: var(--white); }
+
+  .week-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    min-width: 200px;
+    text-align: center;
+    color: var(--ink);
+    letter-spacing: 0.04em;
+  }
+
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .view-toggle button {
+    background: var(--white);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+  }
+  .view-toggle button.active {
+    background: var(--ink);
+    color: var(--white);
+  }
+
+  .staff-filter {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  .staff-chip {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 100px;
+    border: 1.5px solid;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .staff-chip.active {
+    color: white !important;
+  }
+
+  .filter-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    align-self: center;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: var(--map-height);
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    background: var(--white);
+    border-right: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 1rem 1.25rem 0.75rem;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sidebar-title {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+
+  .event-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    background: var(--mist);
+    padding: 0.15rem 0.5rem;
+    border-radius: 100px;
+  }
+
+  .sidebar-scroll {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+  .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+
+  .day-group {
+    border-bottom: 1px solid var(--mist);
+  }
+
+  .day-group-header {
+    padding: 0.6rem 1.25rem;
+    background: var(--paper);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .day-group-header.today {
+    color: var(--sage);
+    background: #edf3ec;
+  }
+
+  .event-card {
+    padding: 0.8rem 1.25rem;
+    border-bottom: 1px solid var(--mist);
+    cursor: pointer;
+    transition: background 0.1s;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+
+  .event-card:hover { background: var(--paper); }
+  .event-card.active { background: #edf3ec; }
+
+  .event-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+
+  .event-body { flex: 1; min-width: 0; }
+
+  .event-person {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin-bottom: 0.15rem;
+  }
+
+  .event-title {
+    font-size: 0.78rem;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.2rem;
+  }
+
+  .event-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .event-meta .proj-badge {
+    background: var(--ink);
+    color: var(--white);
+    padding: 0.05rem 0.35rem;
+    border-radius: 2px;
+    font-size: 0.6rem;
+  }
+
+  .event-meta .location-tag {
+    color: var(--sage);
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .event-meta .type-tag {
+    background: var(--mist);
+    padding: 0.05rem 0.35rem;
+    border-radius: 2px;
+    font-size: 0.6rem;
+  }
+
+  /* ── MAP ── */
+  #map {
+    width: 100%;
+    height: 100%;
+    background: #e8e4da;
+  }
+
+  /* ── TABLE VIEW ── */
+  .table-view {
+    flex: 1;
+    overflow: auto;
+    display: none;
+    background: var(--white);
+  }
+
+  .table-view.visible { display: block; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  thead th {
+    background: var(--ink);
+    color: var(--white);
+    padding: 0.6rem 1rem;
+    text-align: left;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid var(--mist);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--paper); }
+
+  tbody td {
+    padding: 0.55rem 1rem;
+    vertical-align: middle;
+  }
+
+  .td-person {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .person-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── MAP POPUP STYLES ── */
+  .leaflet-popup-content-wrapper {
+    border-radius: 4px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    border: 1px solid var(--rule);
+    padding: 0;
+    overflow: hidden;
+  }
+  .leaflet-popup-content {
+    margin: 0;
+    min-width: 220px;
+  }
+  .popup-inner {
+    padding: 0.75rem 1rem;
+  }
+  .popup-header {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .popup-title {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 0.9rem;
+    color: var(--ink);
+    margin-bottom: 0.5rem;
+    line-height: 1.3;
+  }
+  .popup-row {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.15rem 0;
+  }
+  .popup-row strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .popup-persons {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .popup-person-chip {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 100px;
+    color: white;
+  }
+
+  /* ── LEGEND ── */
+  .map-legend {
+    position: absolute;
+    bottom: 24px;
+    right: 12px;
+    z-index: 1000;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.6rem 0.8rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+  .legend-title {
+    color: var(--text-secondary);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.1rem 0;
+    color: var(--ink);
+  }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.5rem 2rem;
+    display: flex;
+    gap: 2.5rem;
+    align-items: center;
+    border-bottom: 1px solid #333;
+  }
+  .stat-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .stat-num {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 1.25rem;
+    color: var(--clay-light);
+  }
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: #777;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    gap: 0.5rem;
+  }
+  .empty-state .empty-icon { font-size: 2rem; opacity: 0.3; }
+  .empty-state p { font-family: 'DM Mono', monospace; font-size: 0.72rem; }
+
+  /* ── LOADING OVERLAY ── */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(245,242,235,0.85);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    transition: opacity 0.3s;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 2px solid var(--rule);
+    border-top-color: var(--sage);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.06em;
+  }
+
+  /* ── NOTIFICATION ── */
+  .notification {
+    position: fixed;
+    top: 70px;
+    right: 1.5rem;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.65rem 1rem;
+    border-radius: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    z-index: 9998;
+    transform: translateY(-10px);
+    opacity: 0;
+    transition: all 0.3s;
+    border-left: 3px solid var(--sage);
+    letter-spacing: 0.03em;
+    max-width: 300px;
+  }
+  .notification.show { transform: translateY(0); opacity: 1; }
+  .notification.error { border-left-color: var(--clay); }
+
+  /* Map container relative for legend */
+  .map-wrap { position: relative; flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Loading calendar data…</div>
+</div>
+
+<!-- Notification toast -->
+<div class="notification" id="notification"></div>
+
+<header>
+  <div class="header-left">
+    <div class="brand">Clarkson<span>Woods</span></div>
+    <div class="header-subtitle">Staff Whereabouts</div>
+  </div>
+  <div class="header-right">
+    <div class="last-sync" id="lastSync">Not synced</div>
+    <button class="sync-btn" onclick="refreshData()" id="syncBtn">
+      ↻ Refresh
+    </button>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="week-nav">
+    <button onclick="changeWeek(-1)">‹</button>
+    <div class="week-label" id="weekLabel">Loading…</div>
+    <button onclick="changeWeek(1)">›</button>
+    <button onclick="goToThisWeek()" style="font-family:'DM Mono',monospace;font-size:0.65rem;width:auto;padding:0 0.6rem;letter-spacing:0.04em;">Today</button>
+  </div>
+  <div class="view-toggle">
+    <button class="active" onclick="setView('map')" id="btnMap">Map</button>
+    <button onclick="setView('table')" id="btnTable">List</button>
+  </div>
+  <div class="filter-label">Staff:</div>
+  <div class="staff-filter" id="staffFilter"></div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-item"><span class="stat-num" id="statEvents">—</span><span class="stat-label">site visits</span></div>
+  <div class="stat-item"><span class="stat-num" id="statStaff">—</span><span class="stat-label">staff out</span></div>
+  <div class="stat-item"><span class="stat-num" id="statCounties">—</span><span class="stat-label">counties</span></div>
+  <div class="stat-item"><span class="stat-num" id="statProjects">—</span><span class="stat-label">projects</span></div>
+</div>
+
+<div class="main">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">This Week's Visits</div>
+      <div class="event-count" id="eventCount">0 events</div>
+    </div>
+    <div class="sidebar-scroll" id="sidebarScroll">
+      <div class="empty-state">
+        <div class="empty-icon">📅</div>
+        <p>No events loaded</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map / Table area -->
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="map-legend" id="mapLegend"></div>
+
+    <div class="table-view" id="tableView">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Person</th>
+            <th>Date</th>
+            <th>Project #</th>
+            <th>Site</th>
+            <th>Town</th>
+            <th>County</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONFIGURATION — edit these to match your environment
+// ═══════════════════════════════════════════════════════════
+const CONFIG = {
+  // SharePoint list URL (REST API endpoint for the cached calendar list)
+  calendarListUrl: 'https://clarksonwoods.sharepoint.com/sites/Data/_api/web/lists/getbytitle(\'StaffCalendarCache\')/items',
+
+  // SharePoint won projects workbook (loaded via SharePoint REST or a small
+  // Azure Function proxy — see SETUP.md for how to expose this as JSON)
+  projectsApiUrl: 'https://clarksonwoods.sharepoint.com/sites/Data/_api/web/lists/getbytitle(\'WonProjects\')/items',
+
+  // Set to true when running against the real SharePoint API
+  useLiveData: false,
+
+  // Staff members & their assigned colours
+  staff: [
+    { name: 'Tom',      color: '#4a6741' },
+    { name: 'Harry',    color: '#c4703a' },
+    { name: 'Polly',    color: '#6b5fa0' },
+    { name: 'Henry',    color: '#2e7d9e' },
+    { name: 'Frankie',  color: '#b05070' },
+    { name: 'Sarah R',  color: '#8b6914' },
+    { name: 'Joel',     color: '#3a7a6a' },
+    { name: 'Toby',     color: '#7a4030' },
+    { name: 'Molly',    color: '#5a6a3a' },
+    { name: 'Charlie',  color: '#4a5a8a' },
+    { name: 'Charlie D',color: '#7a8040' },
+    { name: 'Miranda',  color: '#8a4060' },
+    { name: 'Bex',      color: '#3a6a8a' },
+    { name: 'Chris',    color: '#6a5030' },
+    { name: 'Pete',     color: '#5a3a7a' },
+    { name: 'Hannah',   color: '#7a4a50' },
+    { name: 'Jo',       color: '#3a7a50' },
+    { name: 'Will',     color: '#6a7a30' },
+  ]
+};
+
+// ═══════════════════════════════════════════════════════════
+// DEMO DATA — replaced by live SharePoint data in production
+// ═══════════════════════════════════════════════════════════
+const DEMO_EVENTS = [
+  { id:1, person:'Tom',      date:'2026-05-11', projectNo:'9563', title:'SURVEY – 9563 Trerice Solar Farm',       town:'St. Dennis',       county:'Cornwall',             lat:50.3744, lng:-4.9281, type:'Survey' },
+  { id:2, person:'Harry',    date:'2026-05-11', projectNo:'9575', title:'SURVEY – 9575 Yalberton Tor Quarry',     town:'Paignton',         county:'Devon',                lat:50.4127, lng:-3.5740, type:'Survey' },
+  { id:3, person:'Tom',      date:'2026-05-12', projectNo:'9558', title:'SURVEY – 9558 The Firs Wellsway',        town:'Blackford',        county:'Somerset',             lat:51.2310, lng:-2.7200, type:'Survey' },
+  { id:4, person:'Polly',    date:'2026-05-12', projectNo:'9548', title:'SURVEY – 9548 Somerset Circle P1',       town:'Chilcompton',      county:'Somerset',             lat:51.2700, lng:-2.5600, type:'Survey' },
+  { id:5, person:'Henry',    date:'2026-05-12', projectNo:'9549', title:'SURVEY – 9549 Sutton Courtenay Data Ctr',town:'Sutton Courtenay', county:'Oxfordshire',          lat:51.6347, lng:-1.2680, type:'Survey' },
+  { id:6, person:'Harry',    date:'2026-05-13', projectNo:'9554', title:'SURVEY – 9554 Bramford Twinstead',       town:'Bramford',         county:'Suffolk',              lat:52.0721, lng:1.0476, type:'Survey' },
+  { id:7, person:'Sarah R',  date:'2026-05-13', projectNo:'9550', title:'SURVEY – 9550 Aberedw GCN',              town:'Aberedw',          county:'Powys',                lat:52.0607, lng:-3.2690, type:'Survey' },
+  { id:8, person:'Tom',      date:'2026-05-13', projectNo:'9538', title:'SURVEY – 9538 Earlstrees Ind Est',       town:'Corby',            county:'North Northamptonshire',lat:52.4948, lng:-0.6969, type:'Survey' },
+  { id:9, person:'Polly',    date:'2026-05-13', projectNo:'9546', title:'SURVEY – 9546 Imagination 02',           town:'Knowsley',         county:'Merseyside',           lat:53.4516, lng:-2.8455, type:'Survey' },
+  { id:10,person:'Henry',    date:'2026-05-13', projectNo:'9544', title:'SURVEY – 9544 East Bedlington Data Ctr', town:'Bedlington',       county:'Northumberland',       lat:55.1320, lng:-1.5765, type:'Survey' },
+  { id:11,person:'Frankie',  date:'2026-05-14', projectNo:'9537', title:'SURVEY – 9537 Chinook Oldhill Wood',     town:'Studham',          county:'Bedford',              lat:51.8563, lng:-0.4930, type:'Survey' },
+  { id:12,person:'Harry',    date:'2026-05-14', projectNo:'9536', title:'SURVEY – 9536 Gwel An Mor',              town:'Redruth',          county:'Cornwall',             lat:50.2330, lng:-5.2260, type:'Survey' },
+  { id:13,person:'Harry',    date:'2026-05-14', projectNo:'9525', title:'SURVEY – 9525 Little Crow Solar Farm',   town:'Scunthorpe',       county:'Lincolnshire',         lat:53.5809, lng:-0.6502, type:'Survey' },
+  { id:14,person:'Tom',      date:'2026-05-14', projectNo:'9521', title:'SURVEY – 9521 Francis Fields Keyford',   town:'Frome',            county:'Somerset',             lat:51.2274, lng:-2.3240, type:'Survey' },
+  { id:15,person:'Tom',      date:'2026-05-15', projectNo:'9517', title:'SURVEY – 9517 Earlstrees P1+2',          town:'Corby',            county:'North Northamptonshire',lat:52.4978, lng:-0.7010, type:'Survey' },
+  { id:16,person:'Pete',     date:'2026-05-15', projectNo:'9516', title:'SURVEY – 9516 Old Vicarage Lane',        town:'South Marston',    county:'Swindon',              lat:51.5744, lng:-1.7190, type:'Survey' },
+  { id:17,person:'Harry',    date:'2026-05-15', projectNo:'9515', title:'SURVEY – 9515 Unity Holidays',           town:'Brean',            county:'Somerset',             lat:51.2785, lng:-3.0094, type:'Survey' },
+  { id:18,person:'Harry',    date:'2026-05-15', projectNo:'9514', title:'SURVEY – 9514 Holly Lane Energy Park',   town:'Solihull',         county:'West Midlands',        lat:52.4479, lng:-1.7390, type:'Survey' },
+  { id:19,person:'Joel',     date:'2026-05-15', projectNo:'9573', title:'SURVEY – 9573 Backwell LGS',             town:'Backwell',         county:'North Somerset',       lat:51.3936, lng:-2.7700, type:'Survey' },
+  { id:20,person:'Charlie D',date:'2026-05-15', projectNo:'9515', title:'MEETING – 9515 Unity Holidays client',  town:'Brean',            county:'Somerset',             lat:51.2790, lng:-3.0085, type:'Meeting' },
+];
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let currentWeekStart = getWeekStart(new Date());
+let allEvents = [];
+let filteredEvents = [];
+let activeStaff = new Set(CONFIG.staff.map(s => s.name));
+let currentView = 'map';
+let map, markers = [], markerLayer;
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  buildStaffFilter();
+  updateWeekLabel();
+  loadData();
+});
+
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    maxZoom: 19
+  }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+}
+
+function buildStaffFilter() {
+  const container = document.getElementById('staffFilter');
+  container.innerHTML = '';
+  CONFIG.staff.forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'staff-chip active';
+    chip.textContent = s.name;
+    chip.style.borderColor = s.color;
+    chip.style.color = s.color;
+    chip.style.backgroundColor = s.color + '22';
+    chip.dataset.name = s.name;
+    chip.addEventListener('click', () => toggleStaff(s.name, chip, s.color));
+    container.appendChild(chip);
+  });
+  // "All" toggle
+  const allBtn = document.createElement('div');
+  allBtn.className = 'staff-chip';
+  allBtn.textContent = 'All';
+  allBtn.style.borderColor = '#999';
+  allBtn.style.color = '#999';
+  allBtn.style.marginLeft = '0.25rem';
+  allBtn.addEventListener('click', selectAllStaff);
+  container.appendChild(allBtn);
+}
+
+function toggleStaff(name, chip, color) {
+  if (activeStaff.has(name)) {
+    activeStaff.delete(name);
+    chip.classList.remove('active');
+    chip.style.backgroundColor = 'transparent';
+  } else {
+    activeStaff.add(name);
+    chip.classList.add('active');
+    chip.style.backgroundColor = color + '22';
+  }
+  renderAll();
+}
+
+function selectAllStaff() {
+  CONFIG.staff.forEach(s => activeStaff.add(s.name));
+  document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
+    const color = CONFIG.staff.find(s => s.name === chip.dataset.name)?.color || '#999';
+    chip.classList.add('active');
+    chip.style.backgroundColor = color + '22';
+  });
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATA LOADING
+// ═══════════════════════════════════════════════════════════
+async function loadData() {
+  showLoading(true);
+  try {
+    if (CONFIG.useLiveData) {
+      allEvents = await fetchSharePointData();
+    } else {
+      await new Promise(r => setTimeout(r, 800)); // simulate fetch
+      allEvents = DEMO_EVENTS;
+      document.getElementById('lastSync').textContent = 'Demo data';
+    }
+    renderAll();
+    showNotification('Calendar data loaded', 'ok');
+  } catch(e) {
+    showNotification('Failed to load data: ' + e.message, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function refreshData() {
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('syncing');
+  btn.textContent = '↻ Syncing…';
+  await loadData();
+  btn.classList.remove('syncing');
+  btn.textContent = '↻ Refresh';
+  document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+}
+
+// ── SharePoint fetch (production) ──────────────────────────
+async function fetchSharePointData() {
+  const ws = currentWeekStart.toISOString().split('T')[0];
+  const we = getWeekEnd(currentWeekStart).toISOString().split('T')[0];
+  const url = `${CONFIG.calendarListUrl}?$filter=EventDate ge '${ws}' and EventDate le '${we}'&$top=500&$orderby=EventDate asc`;
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json;odata=verbose' },
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error(`SharePoint error ${res.status}`);
+  const data = await res.json();
+  return data.d.results.map(item => ({
+    id:        item.Id,
+    person:    item.StaffName,
+    date:      item.EventDate.split('T')[0],
+    projectNo: item.ProjectNumber || extractProjectNo(item.Title),
+    title:     item.Title,
+    town:      item.Town,
+    county:    item.County,
+    lat:       parseFloat(item.Latitude),
+    lng:       parseFloat(item.Longitude),
+    type:      item.EventType || 'Survey',
+  }));
+}
+
+// Extract 4-digit project number from a string
+function extractProjectNo(str) {
+  const m = (str || '').match(/\b(\d{4})\b/);
+  return m ? m[1] : null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════
+function renderAll() {
+  const ws = currentWeekStart;
+  const we = getWeekEnd(ws);
+  filteredEvents = allEvents.filter(e => {
+    const d = new Date(e.date);
+    return d >= ws && d <= we && activeStaff.has(e.person);
+  });
+  updateStats();
+  renderSidebar();
+  renderMap();
+  renderTable();
+  renderLegend();
+}
+
+function updateStats() {
+  const siteVisits = filteredEvents.filter(e => e.type === 'Survey').length;
+  const staff = new Set(filteredEvents.map(e => e.person)).size;
+  const counties = new Set(filteredEvents.filter(e=>e.county).map(e => e.county)).size;
+  const projects = new Set(filteredEvents.filter(e=>e.projectNo).map(e => e.projectNo)).size;
+  document.getElementById('statEvents').textContent = siteVisits;
+  document.getElementById('statStaff').textContent = staff;
+  document.getElementById('statCounties').textContent = counties;
+  document.getElementById('statProjects').textContent = projects;
+  document.getElementById('eventCount').textContent = filteredEvents.length + ' event' + (filteredEvents.length!==1?'s':'');
+}
+
+function renderSidebar() {
+  const container = document.getElementById('sidebarScroll');
+  if (!filteredEvents.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><p>No events this week</p></div>';
+    return;
+  }
+  const grouped = groupByDate(filteredEvents);
+  const today = new Date().toISOString().split('T')[0];
+  let html = '';
+  grouped.forEach((events, date) => {
+    const isToday = date === today;
+    const label = formatDateLabel(date);
+    html += `<div class="day-group">
+      <div class="day-group-header ${isToday?'today':''}">${label}${isToday?' — Today':''}</div>`;
+    events.forEach(e => {
+      const color = staffColor(e.person);
+      const locTag = e.town ? `<span class="location-tag">◎ ${e.town}${e.county?', '+e.county:''}</span>` : '';
+      const projBadge = e.projectNo ? `<span class="proj-badge">${e.projectNo}</span>` : '';
+      html += `<div class="event-card" data-id="${e.id}" onclick="focusEvent(${e.id})">
+        <div class="event-dot" style="background:${color}"></div>
+        <div class="event-body">
+          <div class="event-person" style="color:${color}">${e.person}</div>
+          <div class="event-title">${e.title}</div>
+          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span></div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function renderMap() {
+  markerLayer.clearLayers();
+  // Group events by location (same lat/lng)
+  const locations = {};
+  filteredEvents.forEach(e => {
+    if (!e.lat || !e.lng) return;
+    const key = `${e.lat.toFixed(4)},${e.lng.toFixed(4)}`;
+    if (!locations[key]) locations[key] = { lat: e.lat, lng: e.lng, events: [] };
+    locations[key].events.push(e);
+  });
+
+  Object.values(locations).forEach(loc => {
+    const events = loc.events;
+    const persons = [...new Set(events.map(e => e.person))];
+    const multiPerson = persons.length > 1;
+
+    // Build marker SVG
+    const size = multiPerson ? 32 : 24;
+    const svgParts = persons.slice(0, 4).map((p, i) => {
+      const color = staffColor(p);
+      if (persons.length === 1) {
+        return `<circle cx="12" cy="12" r="10" fill="${color}" opacity="0.9"/>
+                <circle cx="12" cy="12" r="5" fill="white" opacity="0.6"/>`;
+      }
+      const angle = (i / persons.length) * 2 * Math.PI - Math.PI / 2;
+      const cx = 16 + 9 * Math.cos(angle);
+      const cy = 16 + 9 * Math.sin(angle);
+      return `<circle cx="${cx}" cy="${cy}" r="7" fill="${color}" opacity="0.9" stroke="white" stroke-width="1.5"/>`;
+    }).join('');
+    const extra = persons.length > 4 ? `<text x="${size/2}" y="${size/2+4}" text-anchor="middle" font-family="monospace" font-size="8" fill="#333">+${persons.length-4}</text>` : '';
+
+    const svgIcon = L.divIcon({
+      html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${svgParts}${extra}</svg>`,
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2],
+    });
+
+    const popupContent = buildPopup(loc, persons);
+    const marker = L.marker([loc.lat, loc.lng], { icon: svgIcon })
+      .bindPopup(popupContent, { maxWidth: 280 });
+    markerLayer.addLayer(marker);
+  });
+
+  // Fit bounds if we have markers
+  const latlngs = Object.values(locations).map(l => [l.lat, l.lng]);
+  if (latlngs.length > 1) {
+    map.fitBounds(latlngs, { padding: [40, 40] });
+  } else if (latlngs.length === 1) {
+    map.setView(latlngs[0], 10);
+  }
+}
+
+function buildPopup(loc, persons) {
+  const events = loc.events;
+  const proj = events[0].projectNo ? `<div class="popup-row"><span>Project</span><strong>${events[0].projectNo}</strong></div>` : '';
+  const chips = persons.map(p =>
+    `<span class="popup-person-chip" style="background:${staffColor(p)}">${p}</span>`
+  ).join('');
+  return `<div class="popup-inner">
+    <div class="popup-header">${events[0].type} · ${formatDateShort(events[0].date)}</div>
+    <div class="popup-title">${events[0].title.replace(/^SURVEY\s*–\s*/i,'').replace(/^MEETING\s*–\s*/i,'')}</div>
+    ${proj}
+    <div class="popup-row"><span>Location</span><strong>${events[0].town || ''}${events[0].county?', '+events[0].county:''}</strong></div>
+    <div class="popup-persons">${chips}</div>
+  </div>`;
+}
+
+function renderLegend() {
+  const visibleStaff = [...new Set(filteredEvents.map(e => e.person))];
+  const legend = document.getElementById('mapLegend');
+  if (!visibleStaff.length) { legend.style.display = 'none'; return; }
+  legend.style.display = 'block';
+  legend.innerHTML = `<div class="legend-title">Staff this week</div>` +
+    visibleStaff.map(p => `<div class="legend-item"><div class="legend-dot" style="background:${staffColor(p)}"></div>${p}</div>`).join('');
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = filteredEvents.map(e => {
+    const color = staffColor(e.person);
+    return `<tr onclick="focusEvent(${e.id})">
+      <td><div class="td-person"><div class="person-dot" style="background:${color}"></div>${e.person}</div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:0.72rem">${formatDateShort(e.date)}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:0.72rem">${e.projectNo||'—'}</td>
+      <td>${e.title.replace(/^(SURVEY|MEETING)\s*–\s*/i,'')}</td>
+      <td>${e.town||'—'}</td>
+      <td>${e.county||'—'}</td>
+      <td><span class="type-tag" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.15rem 0.5rem;background:var(--mist);border-radius:2px">${e.type}</span></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-secondary);font-family:'DM Mono',monospace;font-size:0.72rem">No events for this week</td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// INTERACTIONS
+// ═══════════════════════════════════════════════════════════
+function focusEvent(id) {
+  const e = allEvents.find(x => x.id === id);
+  if (!e || !e.lat) return;
+  if (currentView !== 'map') setView('map');
+  map.flyTo([e.lat, e.lng], 11, { duration: 0.8 });
+  // Highlight sidebar card
+  document.querySelectorAll('.event-card').forEach(c => c.classList.remove('active'));
+  const card = document.querySelector(`.event-card[data-id="${id}"]`);
+  if (card) { card.classList.add('active'); card.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+}
+
+function setView(view) {
+  currentView = view;
+  document.getElementById('btnMap').classList.toggle('active', view === 'map');
+  document.getElementById('btnTable').classList.toggle('active', view === 'table');
+  document.getElementById('map').style.display = view === 'map' ? 'block' : 'none';
+  document.getElementById('mapLegend').style.display = view === 'map' ? 'block' : 'none';
+  document.getElementById('tableView').classList.toggle('visible', view === 'table');
+  if (view === 'map') { setTimeout(() => map.invalidateSize(), 50); }
+}
+
+function changeWeek(dir) {
+  const d = new Date(currentWeekStart);
+  d.setDate(d.getDate() + dir * 7);
+  currentWeekStart = d;
+  updateWeekLabel();
+  renderAll();
+}
+
+function goToThisWeek() {
+  currentWeekStart = getWeekStart(new Date());
+  updateWeekLabel();
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════
+function getWeekStart(d) {
+  const date = new Date(d);
+  const day = date.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day; // Mon
+  date.setDate(date.getDate() + diff);
+  date.setHours(0,0,0,0);
+  return date;
+}
+function getWeekEnd(ws) {
+  const d = new Date(ws);
+  d.setDate(d.getDate() + 6);
+  d.setHours(23,59,59,999);
+  return d;
+}
+
+function updateWeekLabel() {
+  const ws = currentWeekStart;
+  const we = getWeekEnd(ws);
+  const fmt = d => d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  document.getElementById('weekLabel').textContent =
+    `w/c ${fmt(ws)}  —  ${fmt(we)} ${we.getFullYear()}`;
+}
+
+function staffColor(name) {
+  return CONFIG.staff.find(s => s.name === name)?.color || '#888';
+}
+
+function groupByDate(events) {
+  const map = new Map();
+  [...events].sort((a,b) => a.date.localeCompare(b.date)).forEach(e => {
+    if (!map.has(e.date)) map.set(e.date, []);
+    map.get(e.date).push(e);
+  });
+  return map;
+}
+
+function formatDateLabel(dateStr) {
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' });
+}
+function formatDateShort(dateStr) {
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+}
+
+function showLoading(show) {
+  document.getElementById('loadingOverlay').classList.toggle('hidden', !show);
+}
+
+function showNotification(msg, type='ok') {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.className = 'notification show' + (type==='error'?' error':'');
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+</script>
+</body>
+</html>
