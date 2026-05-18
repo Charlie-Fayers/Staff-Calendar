@@ -685,13 +685,13 @@
 // ═══════════════════════════════════════════════════════════
 const CONFIG = {
   // SharePoint list URL for cached calendar events
-  calendarListUrl: 'https://clarksonwoods.sharepoint.com/sites/Data/_api/web/lists/getbytitle(\'StaffCalendarCache\')/items',
+  calendarListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'StaffCalendarCache\')/items',
 
-  // SharePoint Staff list — "All CW Staff" on CWField site (columns: Title, Email)
-  staffListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'All CW Staff\')/items?$select=Title,Email&$top=500&$orderby=Title asc',
+  // SharePoint Staff list — "Staff" on CWField site (columns: Title, field_1)
+  staffListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'Staff\')/items?$select=Title,field_1&$top=500&$orderby=Title asc',
 
   // Set to true when running against the real SharePoint API
-  useLiveData: false,
+  useLiveData: true,
 };
 
 // Palette of distinct colours assigned to staff in load order
@@ -786,10 +786,10 @@ async function loadStaff() {
       if (!res.ok) throw new Error(`Staff list error ${res.status}`);
       const data = await res.json();
       staffList = data.d.results
-        .filter(r => r.Title && r.Email)
+        .filter(r => r.Title && r.field_1)
         .map((r, i) => ({
           name:  r.Title,
-          email: r.Email,
+          email: r.field_1,
           color: COLOUR_PALETTE[i % COLOUR_PALETTE.length]
         }));
       showNotification(`Loaded ${staffList.length} staff members`, 'ok');
