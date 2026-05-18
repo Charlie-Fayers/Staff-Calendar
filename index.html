@@ -390,6 +390,83 @@
 
   .table-view.visible { display: block; }
 
+  /* ── GRID VIEW ── */
+  .grid-view {
+    flex: 1;
+    overflow: auto;
+    display: none;
+    background: var(--white);
+    padding: 1rem;
+  }
+  .grid-view.visible { display: block; }
+  .grid-scroll {
+    overflow: auto;
+    height: 100%;
+  }
+  table.week-grid {
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    width: 100%;
+    min-width: 760px;
+  }
+  table.week-grid th,
+  table.week-grid td {
+    border: 1px solid var(--rule);
+    vertical-align: top;
+    padding: 0.35rem 0.5rem;
+    min-width: 88px;
+  }
+  table.week-grid th {
+    background: var(--ink);
+    color: var(--white);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  table.week-grid th.today { background: var(--accent); }
+  table.week-grid td.today { background: #fef7e6; }
+  table.week-grid td.person-cell {
+    background: #fafaf8;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  table.week-grid .grid-event {
+    margin-bottom: 0.25rem;
+    padding: 0.2rem 0.35rem;
+    border-radius: 2px;
+    font-size: 0.68rem;
+    line-height: 1.25;
+    cursor: pointer;
+    color: white;
+  }
+  table.week-grid .grid-event:hover { opacity: 0.85; }
+  table.week-grid .grid-event-proj {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    opacity: 0.85;
+  }
+  table.week-grid .grid-event-loc {
+    font-size: 0.62rem;
+    opacity: 0.92;
+  }
+
+  /* Routes toggle button active state */
+  #routesToggle.active {
+    background: var(--ink) !important;
+    color: var(--white);
+    border-color: var(--ink);
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -490,6 +567,23 @@
     padding: 0.15rem 0.45rem;
     border-radius: 100px;
     color: white;
+  }
+  .popup-attendees {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .popup-attendee {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .popup-attend-line {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
   }
 
   /* ── LEGEND ── */
@@ -652,8 +746,10 @@
   </div>
   <div class="view-toggle">
     <button class="active" onclick="setView('map')" id="btnMap">Map</button>
+    <button onclick="setView('grid')" id="btnGrid">Grid</button>
     <button onclick="setView('table')" id="btnTable">List</button>
   </div>
+  <button id="routesToggle" onclick="toggleRoutes()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">↝ Routes</button>
   <div class="filter-label">Staff:</div>
   <div class="staff-filter" id="staffFilter"></div>
 </div>
@@ -700,6 +796,10 @@
         </thead>
         <tbody id="tableBody"></tbody>
       </table>
+    </div>
+
+    <div class="grid-view" id="gridView">
+      <div class="grid-scroll" id="gridScroll"></div>
     </div>
   </div>
 </div>
@@ -825,7 +925,9 @@ let filteredEvents = [];
 let staffList = [];
 let activeStaff = new Set();
 let currentView = 'map';
-let map, markers = [], markerLayer;
+let map, markers = [], markerLayer, routeLayer;
+let mapInitialised = false;
+let showRoutes = false;
 
 // Demo staff — used when useLiveData is false
 const DEMO_STAFF = [
@@ -886,6 +988,7 @@ function initMap() {
     maxZoom: 19
   }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
+  routeLayer = L.layerGroup().addTo(map);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -916,13 +1019,20 @@ async function loadStaff() {
   activeStaff = new Set(staffList.map(s => s.name));
 }
 
+function shortName(name) {
+  const parts = name.split(' ');
+  if (parts.length === 1) return parts[0];
+  return parts[0] + ' ' + parts[parts.length - 1][0];
+}
+
 function buildStaffFilter() {
   const container = document.getElementById('staffFilter');
   container.innerHTML = '';
   staffList.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'staff-chip active';
-    chip.textContent = s.name;
+    chip.textContent = shortName(s.name);
+    chip.title = s.name;
     chip.style.borderColor = s.color;
     chip.style.color = s.color;
     chip.style.backgroundColor = s.color + '22';
@@ -933,25 +1043,29 @@ function buildStaffFilter() {
   // "All" toggle — selects all if anyone is deselected, otherwise clears all
   const allBtn = document.createElement('div');
   allBtn.className = 'staff-chip';
-  allBtn.textContent = 'All';
   allBtn.id = 'allStaffBtn';
   allBtn.style.borderColor = '#999';
   allBtn.style.color = '#999';
   allBtn.style.marginLeft = '0.25rem';
   allBtn.addEventListener('click', toggleAllStaff);
   container.appendChild(allBtn);
+  updateAllBtnLabel();
+}
+
+function updateAllBtnLabel() {
+  const btn = document.getElementById('allStaffBtn');
+  if (!btn) return;
+  btn.textContent = activeStaff.size === staffList.length ? 'Clear all' : 'Select all';
 }
 
 function toggleAllStaff() {
   if (activeStaff.size === staffList.length) {
-    // All currently selected — clear them
     activeStaff.clear();
     document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
       chip.classList.remove('active');
       chip.style.backgroundColor = 'transparent';
     });
   } else {
-    // Some/none selected — select all
     staffList.forEach(s => activeStaff.add(s.name));
     document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
       const color = staffList.find(s => s.name === chip.dataset.name)?.color || '#999';
@@ -959,6 +1073,7 @@ function toggleAllStaff() {
       chip.style.backgroundColor = color + '22';
     });
   }
+  updateAllBtnLabel();
   renderAll();
 }
 
@@ -972,6 +1087,7 @@ function toggleStaff(name, chip, color) {
     chip.classList.add('active');
     chip.style.backgroundColor = color + '22';
   }
+  updateAllBtnLabel();
   renderAll();
 }
 
@@ -1039,6 +1155,8 @@ async function fetchSharePointData() {
       id:        item.id,
       person:    f.StaffName,
       date:      f.EventDate ? f.EventDate.split('T')[0] : '',
+      startISO:  f.EventDate || '',
+      endISO:    f.EventEnd || '',
       projectNo: f.ProjectNumber || extractProjectNo(f.Title),
       title:     f.Title,
       town:      f.Town,
@@ -1062,15 +1180,17 @@ function extractProjectNo(str) {
 function renderAll() {
   const ws = currentWeekStart;
   const we = getWeekEnd(ws);
+  const validStaff = new Set(staffList.map(s => s.name));
   filteredEvents = allEvents.filter(e => {
     const d = new Date(e.date);
-    return d >= ws && d <= we && activeStaff.has(e.person);
+    return d >= ws && d <= we && activeStaff.has(e.person) && validStaff.has(e.person);
   });
   updateStats();
   renderSidebar();
   renderMap();
   renderTable();
   renderLegend();
+  if (currentView === 'grid') renderGrid();
 }
 
 function updateStats() {
@@ -1104,8 +1224,19 @@ function renderSidebar() {
       const locTag = e.town ? `<span class="location-tag">◎ ${e.town}${e.county?', '+e.county:''}</span>` : '';
       const projBadge = e.projectNo ? `<span class="proj-badge">${e.projectNo}</span>` : '';
       const noGeo = (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng));
-      const warnTag = noGeo ? `<span class="warn-tag" title="No coordinates — won't show on map">⚠ Not on map</span>` : '';
-      html += `<div class="event-card${noGeo?' nogeo':''}" data-id="${e.id}" onclick="focusEvent(${e.id})">
+      let warnTag = '';
+      if (noGeo) {
+        let reason = 'No coordinates';
+        if (!e.projectNo) {
+          reason = 'No 4-digit site code in calendar entry';
+        } else if (!e.town && !e.county) {
+          reason = `Project ${e.projectNo} not found in Won Projects`;
+        } else {
+          reason = `Project ${e.projectNo} has no coordinates in Won Projects`;
+        }
+        warnTag = `<span class="warn-tag" title="${reason}">⚠ ${reason}</span>`;
+      }
+      html += `<div class="event-card${noGeo?' nogeo':''}" data-id="${e.id}" onclick="focusEvent('${e.id}')">
         <div class="event-dot" style="background:${color}"></div>
         <div class="event-body">
           <div class="event-person" style="color:${color}">${e.person}</div>
@@ -1121,6 +1252,7 @@ function renderSidebar() {
 
 function renderMap() {
   markerLayer.clearLayers();
+  routeLayer.clearLayers();
   // Group events by location (same lat/lng)
   const locations = {};
   filteredEvents.forEach(e => {
@@ -1157,15 +1289,17 @@ function renderMap() {
       iconAnchor: [size/2, size/2],
     });
 
-    // Label: staff name(s) + town
-    const labelStaff = persons.length === 1 ? persons[0]
-                    : persons.length === 2 ? persons.join(' & ')
-                    : `${persons[0]} +${persons.length - 1}`;
-    const labelText = labelStaff + (events[0].town ? ' · ' + events[0].town : '');
+    // Label: staff (short) + dates + town
+    const labelStaff = persons.length === 1 ? shortName(persons[0])
+                    : persons.length === 2 ? persons.map(shortName).join(' & ')
+                    : `${shortName(persons[0])} +${persons.length - 1}`;
+    const dates = [...new Set(events.map(e => e.date))].sort();
+    const dateRange = formatDateRange(dates);
+    const labelText = `${labelStaff} · ${dateRange}` + (events[0].town ? ' · ' + events[0].town : '');
 
     const popupContent = buildPopup(loc, persons);
     const marker = L.marker([loc.lat, loc.lng], { icon: svgIcon })
-      .bindPopup(popupContent, { maxWidth: 280 })
+      .bindPopup(popupContent, { maxWidth: 320 })
       .bindTooltip(labelText, {
         permanent: true,
         direction: 'right',
@@ -1175,30 +1309,150 @@ function renderMap() {
     markerLayer.addLayer(marker);
   });
 
-  // Fit bounds if we have markers, but stay within UK & Ireland
+  // Fit bounds only on first render (or when user clicks "Reset view");
+  // preserve user zoom/pan on subsequent renders.
   const ukBounds = L.latLngBounds([49.5, -10.8], [60.9, 2.0]);
   const latlngs = Object.values(locations).map(l => [l.lat, l.lng]);
-  if (latlngs.length > 1) {
-    map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 12 });
-  } else if (latlngs.length === 1) {
-    map.setView(latlngs[0], 10);
-  } else {
-    map.fitBounds(ukBounds);
+  if (!mapInitialised) {
+    if (latlngs.length > 1) {
+      map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 12 });
+    } else if (latlngs.length === 1) {
+      map.setView(latlngs[0], 10);
+    } else {
+      map.fitBounds(ukBounds);
+    }
+    mapInitialised = true;
   }
+
+  if (showRoutes) renderRoutes();
+}
+
+// ── Office origin ──────────────────────────────────────────
+const OFFICE = { lat: 51.22585379648861, lng: -2.8520737323545187, name: 'Office' };
+const _routeCache = {};
+
+async function renderRoutes() {
+  // Group events by (person, date), only those with coords
+  const groups = {};
+  filteredEvents.forEach(e => {
+    if (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng)) return;
+    const k = `${e.person}|${e.date}`;
+    if (!groups[k]) groups[k] = { person: e.person, date: e.date, stops: [] };
+    groups[k].stops.push(e);
+  });
+
+  for (const k in groups) {
+    const g = groups[k];
+    // Sort stops chronologically by startISO
+    g.stops.sort((a, b) => (a.startISO || '').localeCompare(b.startISO || ''));
+    // Dedupe by lat/lng so we don't re-visit the same point
+    const unique = [];
+    const seen = new Set();
+    for (const s of g.stops) {
+      const key = `${s.lat.toFixed(4)},${s.lng.toFixed(4)}`;
+      if (!seen.has(key)) { seen.add(key); unique.push(s); }
+    }
+    if (unique.length === 0) continue;
+
+    // Build full waypoint list: office -> stops -> office
+    const points = [
+      [OFFICE.lng, OFFICE.lat],
+      ...unique.map(s => [s.lng, s.lat]),
+      [OFFICE.lng, OFFICE.lat],
+    ];
+    drawRoute(g.person, points);
+  }
+}
+
+async function drawRoute(person, points) {
+  const cacheKey = JSON.stringify(points);
+  let coords;
+  if (_routeCache[cacheKey]) {
+    coords = _routeCache[cacheKey];
+  } else {
+    try {
+      const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`);
+      if (!res.ok) throw new Error('OSRM ' + res.status);
+      const data = await res.json();
+      if (!data.routes || !data.routes.length) return;
+      coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);  // [lat, lng]
+      _routeCache[cacheKey] = coords;
+    } catch(e) {
+      console.warn('Route fetch failed for', person, e);
+      // Fall back to straight line
+      coords = points.map(p => [p[1], p[0]]);
+    }
+  }
+  if (!showRoutes) return;   // user may have toggled off while waiting
+  const line = L.polyline(coords, {
+    color: staffColor(person),
+    weight: 3,
+    opacity: 0.55,
+    dashArray: '6, 4',
+  });
+  routeLayer.addLayer(line);
+}
+
+function toggleRoutes() {
+  showRoutes = !showRoutes;
+  document.getElementById('routesToggle').classList.toggle('active', showRoutes);
+  if (showRoutes) {
+    renderRoutes();
+  } else {
+    routeLayer.clearLayers();
+  }
+}
+
+function formatDateRange(dates) {
+  if (!dates.length) return '';
+  const fmt = d => {
+    const dt = new Date(d);
+    const dow = dt.toLocaleDateString('en-GB', { weekday: 'short' });
+    const day = dt.getDate();
+    const suffix = (day >= 11 && day <= 13) ? 'th' :
+                   day % 10 === 1 ? 'st' : day % 10 === 2 ? 'nd' : day % 10 === 3 ? 'rd' : 'th';
+    return `${dow} ${day}${suffix}`;
+  };
+  if (dates.length === 1) return fmt(dates[0]);
+  return `${fmt(dates[0])} – ${fmt(dates[dates.length - 1])}`;
+}
+
+function formatTimeRange(startISO, endISO) {
+  if (!startISO) return '';
+  try {
+    const s = new Date(startISO);
+    const e = endISO ? new Date(endISO) : null;
+    const fmt = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    if (e) return `${fmt(s)} – ${fmt(e)}`;
+    return fmt(s);
+  } catch { return ''; }
 }
 
 function buildPopup(loc, persons) {
   const events = loc.events;
-  const proj = events[0].projectNo ? `<div class="popup-row"><span>Project</span><strong>${events[0].projectNo}</strong></div>` : '';
-  const chips = persons.map(p =>
-    `<span class="popup-person-chip" style="background:${staffColor(p)}">${p}</span>`
-  ).join('');
+  const first = events[0];
+  const proj = first.projectNo ? `<div class="popup-row"><span>Project</span><strong>${first.projectNo}</strong></div>` : '';
+
+  // Per-person date+time rows
+  const personRows = persons.map(p => {
+    const theirs = events.filter(e => e.person === p).sort((a,b) => (a.startISO||'').localeCompare(b.startISO||''));
+    const lines = theirs.map(e => {
+      const t = formatTimeRange(e.startISO, e.endISO);
+      const d = formatDateRange([e.date]);
+      return `<div class="popup-attend-line">${d}${t?' · '+t:''}</div>`;
+    }).join('');
+    return `<div class="popup-attendee">
+      <span class="popup-person-chip" style="background:${staffColor(p)}">${p}</span>
+      ${lines}
+    </div>`;
+  }).join('');
+
   return `<div class="popup-inner">
-    <div class="popup-header">${events[0].type} · ${formatDateShort(events[0].date)}</div>
-    <div class="popup-title">${events[0].title.replace(/^SURVEY\s*–\s*/i,'').replace(/^MEETING\s*–\s*/i,'')}</div>
+    <div class="popup-header">${first.type} · ${first.town||''}${first.county?', '+first.county:''}</div>
+    <div class="popup-title">${first.title.replace(/^SURVEY\s*–\s*/i,'').replace(/^MEETING\s*–\s*/i,'')}</div>
     ${proj}
-    <div class="popup-row"><span>Location</span><strong>${events[0].town || ''}${events[0].county?', '+events[0].county:''}</strong></div>
-    <div class="popup-persons">${chips}</div>
+    <div class="popup-attendees">${personRows}</div>
   </div>`;
 }
 
@@ -1245,10 +1499,71 @@ function setView(view) {
   currentView = view;
   document.getElementById('btnMap').classList.toggle('active', view === 'map');
   document.getElementById('btnTable').classList.toggle('active', view === 'table');
+  document.getElementById('btnGrid').classList.toggle('active', view === 'grid');
   document.getElementById('map').style.display = view === 'map' ? 'block' : 'none';
   document.getElementById('mapLegend').style.display = view === 'map' ? 'block' : 'none';
   document.getElementById('tableView').classList.toggle('visible', view === 'table');
+  document.getElementById('gridView').classList.toggle('visible', view === 'grid');
   if (view === 'map') { setTimeout(() => map.invalidateSize(), 50); }
+  if (view === 'grid') renderGrid();
+}
+
+function renderGrid() {
+  const container = document.getElementById('gridScroll');
+  const ws = currentWeekStart;
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ws);
+    d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+  const todayISO = new Date().toISOString().split('T')[0];
+  const validStaff = staffList.filter(s => activeStaff.has(s.name));
+
+  // Index events by person+date
+  const eventsBy = {};
+  filteredEvents.forEach(e => {
+    const k = e.person + '|' + e.date;
+    if (!eventsBy[k]) eventsBy[k] = [];
+    eventsBy[k].push(e);
+  });
+
+  const fmtDay = d => {
+    const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    const day = d.getDate();
+    const mon = d.toLocaleDateString('en-GB', { month: 'short' });
+    return `${dow}<br>${day} ${mon}`;
+  };
+
+  let html = '<table class="week-grid"><thead><tr><th>Staff</th>';
+  days.forEach(d => {
+    const dISO = d.toISOString().split('T')[0];
+    const isToday = dISO === todayISO;
+    html += `<th class="${isToday?'today':''}">${fmtDay(d)}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  validStaff.forEach(s => {
+    html += `<tr><td class="person-cell" style="color:${s.color}">${shortName(s.name)}</td>`;
+    days.forEach(d => {
+      const dISO = fmtDateLocal(d);
+      const isToday = dISO === todayISO;
+      const evs = eventsBy[s.name + '|' + dISO] || [];
+      html += `<td class="${isToday?'today':''}">`;
+      evs.forEach(e => {
+        const loc = e.town || e.county || '';
+        html += `<div class="grid-event" style="background:${s.color}" onclick="focusEvent('${e.id}')">
+          ${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
+          ${e.title ? `<div>${e.title.replace(/^(SURVEY|MEETING)\s*–\s*/i,'').substring(0, 40)}</div>` : ''}
+          ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}
+        </div>`;
+      });
+      html += '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
 
 function changeWeek(dir) {
