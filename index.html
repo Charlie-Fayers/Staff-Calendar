@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 
 <style>
   :root {
@@ -684,15 +685,73 @@
 // CONFIGURATION — edit these to match your environment
 // ═══════════════════════════════════════════════════════════
 const CONFIG = {
-  // SharePoint list URL for cached calendar events
-  calendarListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'StaffCalendarCache\')/items',
+  // Azure AD app registration
+  clientId:    '235958fa-4974-454b-adbe-718690c4213b',
+  tenantId:    '1f15dbde-db38-4acb-94c7-a8df84555887',
+  redirectUri: 'https://charlie-fayers.github.io/Staff-Calendar/',
 
-  // SharePoint Staff list — "Staff" on CWField site (columns: Title, field_1)
-  staffListUrl: 'https://clarksonwoods.sharepoint.com/sites/CWField/_api/web/lists/getbytitle(\'Staff\')/items?$select=Title,field_1&$top=500&$orderby=Title asc',
+  // Microsoft Graph site & list identifiers
+  siteId:           'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
+  staffListName:    'Staff',
+  calendarListName: 'StaffCalendarCache',
 
-  // Set to true when running against the real SharePoint API
+  // Set to true when running against the real Graph API
   useLiveData: true,
 };
+
+// MSAL.js authentication
+const msalConfig = {
+  auth: {
+    clientId:    CONFIG.clientId,
+    authority:   `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: CONFIG.redirectUri,
+  },
+  cache: {
+    cacheLocation: 'sessionStorage',
+    storeAuthStateInCookie: false,
+  },
+};
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const graphScopes = ['Sites.Read.All', 'User.Read'];
+
+async function getGraphToken() {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) {
+    await msalInstance.loginRedirect({ scopes: graphScopes });
+    return null;
+  }
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: graphScopes,
+      account: accounts[0],
+    });
+    return result.accessToken;
+  } catch (e) {
+    await msalInstance.acquireTokenRedirect({ scopes: graphScopes });
+    return null;
+  }
+}
+
+async function graphFetch(path) {
+  const token = await getGraphToken();
+  if (!token) return null;
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// Cache for resolved Graph list IDs
+const _listIdCache = {};
+async function getListId(listName) {
+  if (_listIdCache[listName]) return _listIdCache[listName];
+  const data = await graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists`);
+  const list = data.value.find(l => l.displayName === listName);
+  if (!list) throw new Error(`List not found: ${listName}`);
+  _listIdCache[listName] = list.id;
+  return list.id;
+}
 
 // Palette of distinct colours assigned to staff in load order
 const COLOUR_PALETTE = [
@@ -755,10 +814,31 @@ const DEMO_STAFF = [
 // INIT
 // ═══════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
+  // Handle login redirect, if we just came back from one
+  try {
+    await msalInstance.handleRedirectPromise();
+  } catch(e) { console.error('Redirect handle error', e); }
+
   initMap();
   updateWeekLabel();
   document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading staff list\u2026';
   showLoading(true);
+
+  // If using live data and not signed in yet, trigger login
+  if (CONFIG.useLiveData && msalInstance.getAllAccounts().length === 0) {
+    showLoading(false);
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;font-family:'Instrument Sans',sans-serif;background:#f5f2eb;">
+        <h2 style="margin-bottom:1rem;color:#1a1a18;">Staff Whereabouts</h2>
+        <p style="margin-bottom:1.5rem;color:#6b6760;">Please sign in with your Clarkson Woods account</p>
+        <button id="signinBtn" style="padding:0.75rem 2rem;background:#4a6741;color:white;border:none;border-radius:4px;font-size:1rem;cursor:pointer;font-family:inherit;">Sign in</button>
+      </div>`;
+    document.getElementById('signinBtn').addEventListener('click', () => {
+      msalInstance.loginRedirect({ scopes: graphScopes });
+    });
+    return;
+  }
+
   await loadStaff();
   buildStaffFilter();
   await loadData();
@@ -779,21 +859,19 @@ function initMap() {
 async function loadStaff() {
   if (CONFIG.useLiveData) {
     try {
-      const res = await fetch(CONFIG.staffListUrl, {
-        headers: { 'Accept': 'application/json;odata=verbose' },
-        credentials: 'include'
-      });
-      if (!res.ok) throw new Error(`Staff list error ${res.status}`);
-      const data = await res.json();
-      staffList = data.d.results
-        .filter(r => r.Title && r.field_1)
+      const listId = await getListId(CONFIG.staffListName);
+      const data = await graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999`);
+      if (!data) return;  // login redirect in progress
+      staffList = data.value
+        .filter(r => r.fields && r.fields.Title && r.fields.field_1)
         .map((r, i) => ({
-          name:  r.Title,
-          email: r.field_1,
+          name:  r.fields.Title,
+          email: r.fields.field_1,
           color: COLOUR_PALETTE[i % COLOUR_PALETTE.length]
         }));
       showNotification(`Loaded ${staffList.length} staff members`, 'ok');
     } catch(e) {
+      console.error(e);
       showNotification('Could not load staff list — using demo staff', 'error');
       staffList = DEMO_STAFF;
     }
@@ -884,29 +962,30 @@ async function refreshData() {
   document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 }
 
-// ── SharePoint fetch (production) ──────────────────────────
+// ── Microsoft Graph fetch (production) ─────────────────────
 async function fetchSharePointData() {
-  const ws = currentWeekStart.toISOString().split('T')[0];
-  const we = getWeekEnd(currentWeekStart).toISOString().split('T')[0];
-  const url = `${CONFIG.calendarListUrl}?$filter=EventDate ge '${ws}' and EventDate le '${we}'&$top=500&$orderby=EventDate asc`;
-  const res = await fetch(url, {
-    headers: { 'Accept': 'application/json;odata=verbose' },
-    credentials: 'include'
+  const ws = currentWeekStart.toISOString().split('T')[0] + 'T00:00:00Z';
+  const we = getWeekEnd(currentWeekStart).toISOString().split('T')[0] + 'T23:59:59Z';
+  const listId = await getListId(CONFIG.calendarListName);
+  const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
+  const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
+  const data = await graphFetch(path);
+  if (!data) return [];   // login redirect in progress
+  return data.value.map(item => {
+    const f = item.fields || {};
+    return {
+      id:        item.id,
+      person:    f.StaffName,
+      date:      f.EventDate ? f.EventDate.split('T')[0] : '',
+      projectNo: f.ProjectNumber || extractProjectNo(f.Title),
+      title:     f.Title,
+      town:      f.Town,
+      county:    f.County,
+      lat:       parseFloat(f.Latitude),
+      lng:       parseFloat(f.Longitude),
+      type:      f.EventType || 'Survey',
+    };
   });
-  if (!res.ok) throw new Error(`SharePoint error ${res.status}`);
-  const data = await res.json();
-  return data.d.results.map(item => ({
-    id:        item.Id,
-    person:    item.StaffName,
-    date:      item.EventDate.split('T')[0],
-    projectNo: item.ProjectNumber || extractProjectNo(item.Title),
-    title:     item.Title,
-    town:      item.Town,
-    county:    item.County,
-    lat:       parseFloat(item.Latitude),
-    lng:       parseFloat(item.Longitude),
-    type:      item.EventType || 'Survey',
-  }));
 }
 
 // Extract 4-digit project number from a string
