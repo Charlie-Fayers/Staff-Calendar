@@ -118,9 +118,10 @@
     padding: 0.75rem 2rem;
     display: flex;
     align-items: center;
-    gap: 2rem;
-    flex-wrap: wrap;
+    gap: 1rem;
+    flex-wrap: nowrap;
   }
+  .controls > .staff-filter { flex: 1 1 0; min-width: 200px; }
 
   .week-nav {
     display: flex;
@@ -180,6 +181,8 @@
     display: flex;
     gap: 0.35rem;
     flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
   }
 
   .staff-chip {
@@ -779,7 +782,6 @@
   <!-- Map / Table area -->
   <div class="map-wrap">
     <div id="map"></div>
-    <div class="map-legend" id="mapLegend"></div>
 
     <div class="table-view" id="tableView">
       <table id="dataTable">
@@ -970,7 +972,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   await loadStaff();
-  buildStaffFilter();
   await loadData();
 });
 
@@ -1028,18 +1029,47 @@ function shortName(name) {
 function buildStaffFilter() {
   const container = document.getElementById('staffFilter');
   container.innerHTML = '';
-  staffList.forEach(s => {
+
+  // Show only staff who have events this week
+  const ws = currentWeekStart;
+  const we = getWeekEnd(ws);
+  const onSiteThisWeek = new Set();
+  allEvents.forEach(e => {
+    const d = new Date(e.date);
+    if (d >= ws && d <= we) onSiteThisWeek.add(e.person);
+  });
+  const visibleStaff = staffList.filter(s => onSiteThisWeek.has(s.name));
+
+  // Update activeStaff to only include visible staff (preserve user toggles where possible)
+  const newActive = new Set();
+  visibleStaff.forEach(s => {
+    if (activeStaff.has(s.name) || activeStaff.size === 0) newActive.add(s.name);
+  });
+  // If we filtered everyone out (e.g. first render), select all visible
+  if (newActive.size === 0) visibleStaff.forEach(s => newActive.add(s.name));
+  activeStaff = newActive;
+
+  visibleStaff.forEach(s => {
     const chip = document.createElement('div');
-    chip.className = 'staff-chip active';
+    chip.className = 'staff-chip' + (activeStaff.has(s.name) ? ' active' : '');
     chip.textContent = shortName(s.name);
     chip.title = s.name;
     chip.style.borderColor = s.color;
     chip.style.color = s.color;
-    chip.style.backgroundColor = s.color + '22';
+    chip.style.backgroundColor = activeStaff.has(s.name) ? s.color + '22' : 'transparent';
     chip.dataset.name = s.name;
     chip.addEventListener('click', () => toggleStaff(s.name, chip, s.color));
     container.appendChild(chip);
   });
+
+  if (visibleStaff.length === 0) {
+    const note = document.createElement('div');
+    note.style.cssText = "font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--text-secondary);";
+    note.textContent = 'No staff on site this week';
+    container.appendChild(note);
+    return;
+  }
+
   // "All" toggle — selects all if anyone is deselected, otherwise clears all
   const allBtn = document.createElement('div');
   allBtn.className = 'staff-chip';
@@ -1055,19 +1085,21 @@ function buildStaffFilter() {
 function updateAllBtnLabel() {
   const btn = document.getElementById('allStaffBtn');
   if (!btn) return;
-  btn.textContent = activeStaff.size === staffList.length ? 'Clear all' : 'Select all';
+  const visibleChips = document.querySelectorAll('.staff-chip[data-name]');
+  btn.textContent = activeStaff.size === visibleChips.length ? 'Clear all' : 'Select all';
 }
 
 function toggleAllStaff() {
-  if (activeStaff.size === staffList.length) {
+  const visibleChips = document.querySelectorAll('.staff-chip[data-name]');
+  if (activeStaff.size === visibleChips.length) {
     activeStaff.clear();
-    document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
+    visibleChips.forEach(chip => {
       chip.classList.remove('active');
       chip.style.backgroundColor = 'transparent';
     });
   } else {
-    staffList.forEach(s => activeStaff.add(s.name));
-    document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
+    visibleChips.forEach(chip => {
+      activeStaff.add(chip.dataset.name);
       const color = staffList.find(s => s.name === chip.dataset.name)?.color || '#999';
       chip.classList.add('active');
       chip.style.backgroundColor = color + '22';
@@ -1115,6 +1147,7 @@ async function loadData() {
       allEvents = DEMO_EVENTS;
       document.getElementById('lastSync').textContent = 'Demo data';
     }
+    buildStaffFilter();   // refresh chips based on who's actually on site this week
     renderAll();
     showNotification('Calendar data loaded', 'ok');
   } catch(e) {
@@ -1189,7 +1222,6 @@ function renderAll() {
   renderSidebar();
   renderMap();
   renderTable();
-  renderLegend();
   if (currentView === 'grid') renderGrid();
 }
 
@@ -1456,15 +1488,6 @@ function buildPopup(loc, persons) {
   </div>`;
 }
 
-function renderLegend() {
-  const visibleStaff = [...new Set(filteredEvents.map(e => e.person))];
-  const legend = document.getElementById('mapLegend');
-  if (!visibleStaff.length) { legend.style.display = 'none'; return; }
-  legend.style.display = 'block';
-  legend.innerHTML = `<div class="legend-title">Staff this week</div>` +
-    visibleStaff.map(p => `<div class="legend-item"><div class="legend-dot" style="background:${staffColor(p)}"></div>${p}</div>`).join('');
-}
-
 function renderTable() {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = filteredEvents.map(e => {
@@ -1501,7 +1524,6 @@ function setView(view) {
   document.getElementById('btnTable').classList.toggle('active', view === 'table');
   document.getElementById('btnGrid').classList.toggle('active', view === 'grid');
   document.getElementById('map').style.display = view === 'map' ? 'block' : 'none';
-  document.getElementById('mapLegend').style.display = view === 'map' ? 'block' : 'none';
   document.getElementById('tableView').classList.toggle('visible', view === 'table');
   document.getElementById('gridView').classList.toggle('visible', view === 'grid');
   if (view === 'map') { setTimeout(() => map.invalidateSize(), 50); }
