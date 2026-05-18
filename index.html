@@ -348,6 +348,17 @@
     border-radius: 2px;
     font-size: 0.6rem;
   }
+  .event-meta .warn-tag {
+    background: #fff3cd;
+    color: #856404;
+    padding: 0.05rem 0.35rem;
+    border-radius: 2px;
+    font-size: 0.6rem;
+    border: 1px solid #ffeaa7;
+  }
+  .event-card.nogeo {
+    opacity: 0.85;
+  }
 
   /* ── MAP ── */
   #map {
@@ -355,6 +366,19 @@
     height: 100%;
     background: #e8e4da;
   }
+  .leaflet-tooltip.map-label {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    color: var(--ink);
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.15rem 0.4rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    white-space: nowrap;
+  }
+  .leaflet-tooltip.map-label::before { display: none; }
 
   /* ── TABLE VIEW ── */
   .table-view {
@@ -849,7 +873,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function initMap() {
-  map = L.map('map', { zoomControl: true }).setView([52.5, -1.5], 6);
+  // UK & Ireland bounding box
+  const ukBounds = L.latLngBounds([49.5, -10.8], [60.9, 2.0]);
+  map = L.map('map', {
+    zoomControl: true,
+    maxBounds: ukBounds,
+    maxBoundsViscosity: 1.0,
+    minZoom: 5,
+  }).fitBounds(ukBounds);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap © CARTO',
     maxZoom: 19
@@ -899,15 +930,36 @@ function buildStaffFilter() {
     chip.addEventListener('click', () => toggleStaff(s.name, chip, s.color));
     container.appendChild(chip);
   });
-  // "All" toggle
+  // "All" toggle — selects all if anyone is deselected, otherwise clears all
   const allBtn = document.createElement('div');
   allBtn.className = 'staff-chip';
   allBtn.textContent = 'All';
+  allBtn.id = 'allStaffBtn';
   allBtn.style.borderColor = '#999';
   allBtn.style.color = '#999';
   allBtn.style.marginLeft = '0.25rem';
-  allBtn.addEventListener('click', selectAllStaff);
+  allBtn.addEventListener('click', toggleAllStaff);
   container.appendChild(allBtn);
+}
+
+function toggleAllStaff() {
+  if (activeStaff.size === staffList.length) {
+    // All currently selected — clear them
+    activeStaff.clear();
+    document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
+      chip.classList.remove('active');
+      chip.style.backgroundColor = 'transparent';
+    });
+  } else {
+    // Some/none selected — select all
+    staffList.forEach(s => activeStaff.add(s.name));
+    document.querySelectorAll('.staff-chip[data-name]').forEach(chip => {
+      const color = staffList.find(s => s.name === chip.dataset.name)?.color || '#999';
+      chip.classList.add('active');
+      chip.style.backgroundColor = color + '22';
+    });
+  }
+  renderAll();
 }
 
 function toggleStaff(name, chip, color) {
@@ -967,9 +1019,15 @@ async function refreshData() {
 }
 
 // ── Microsoft Graph fetch (production) ─────────────────────
+function fmtDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 async function fetchSharePointData() {
-  const ws = currentWeekStart.toISOString().split('T')[0] + 'T00:00:00Z';
-  const we = getWeekEnd(currentWeekStart).toISOString().split('T')[0] + 'T23:59:59Z';
+  const ws = fmtDateLocal(currentWeekStart) + 'T00:00:00Z';
+  const we = fmtDateLocal(getWeekEnd(currentWeekStart)) + 'T23:59:59Z';
   const listId = await getListId(CONFIG.calendarListName);
   const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
   const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
@@ -1045,12 +1103,14 @@ function renderSidebar() {
       const color = staffColor(e.person);
       const locTag = e.town ? `<span class="location-tag">◎ ${e.town}${e.county?', '+e.county:''}</span>` : '';
       const projBadge = e.projectNo ? `<span class="proj-badge">${e.projectNo}</span>` : '';
-      html += `<div class="event-card" data-id="${e.id}" onclick="focusEvent(${e.id})">
+      const noGeo = (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng));
+      const warnTag = noGeo ? `<span class="warn-tag" title="No coordinates — won't show on map">⚠ Not on map</span>` : '';
+      html += `<div class="event-card${noGeo?' nogeo':''}" data-id="${e.id}" onclick="focusEvent(${e.id})">
         <div class="event-dot" style="background:${color}"></div>
         <div class="event-body">
           <div class="event-person" style="color:${color}">${e.person}</div>
           <div class="event-title">${e.title}</div>
-          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span></div>
+          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>${warnTag}</div>
         </div>
       </div>`;
     });
@@ -1097,18 +1157,33 @@ function renderMap() {
       iconAnchor: [size/2, size/2],
     });
 
+    // Label: staff name(s) + town
+    const labelStaff = persons.length === 1 ? persons[0]
+                    : persons.length === 2 ? persons.join(' & ')
+                    : `${persons[0]} +${persons.length - 1}`;
+    const labelText = labelStaff + (events[0].town ? ' · ' + events[0].town : '');
+
     const popupContent = buildPopup(loc, persons);
     const marker = L.marker([loc.lat, loc.lng], { icon: svgIcon })
-      .bindPopup(popupContent, { maxWidth: 280 });
+      .bindPopup(popupContent, { maxWidth: 280 })
+      .bindTooltip(labelText, {
+        permanent: true,
+        direction: 'right',
+        offset: [size/2 + 2, 0],
+        className: 'map-label',
+      });
     markerLayer.addLayer(marker);
   });
 
-  // Fit bounds if we have markers
+  // Fit bounds if we have markers, but stay within UK & Ireland
+  const ukBounds = L.latLngBounds([49.5, -10.8], [60.9, 2.0]);
   const latlngs = Object.values(locations).map(l => [l.lat, l.lng]);
   if (latlngs.length > 1) {
-    map.fitBounds(latlngs, { padding: [40, 40] });
+    map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 12 });
   } else if (latlngs.length === 1) {
     map.setView(latlngs[0], 10);
+  } else {
+    map.fitBounds(ukBounds);
   }
 }
 
@@ -1181,13 +1256,21 @@ function changeWeek(dir) {
   d.setDate(d.getDate() + dir * 7);
   currentWeekStart = d;
   updateWeekLabel();
-  renderAll();
+  if (CONFIG.useLiveData) {
+    loadData();   // refetch for the new week's range
+  } else {
+    renderAll();
+  }
 }
 
 function goToThisWeek() {
   currentWeekStart = getWeekStart(new Date());
   updateWeekLabel();
-  renderAll();
+  if (CONFIG.useLiveData) {
+    loadData();
+  } else {
+    renderAll();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
