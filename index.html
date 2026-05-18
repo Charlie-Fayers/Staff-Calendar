@@ -736,7 +736,11 @@ async function graphFetch(path) {
   const token = await getGraphToken();
   if (!token) return null;
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      'Prefer': 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    },
   });
   if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
   return res.json();
