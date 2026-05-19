@@ -251,7 +251,7 @@
     display: none;
     position: absolute;
     top: 0.75rem;
-    left: 0.75rem;
+    left: 3.5rem;          /* leave room for Leaflet zoom controls (top-left) */
     z-index: 1050;
     background: var(--white);
     border: 1px solid var(--rule);
@@ -261,6 +261,17 @@
     font-size: 0.7rem;
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+  @media (max-width: 600px) {
+    .sidebar-toggle {
+      top: auto;
+      bottom: 1rem;
+      left: 1rem;
+      padding: 0.6rem 0.85rem;
+      font-size: 0.75rem;
+      border-radius: 100px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
   }
   .sidebar-backdrop {
     display: none;
@@ -1080,6 +1091,105 @@
     flex: 1;
     min-height: 0;
   }
+
+  /* Small persistent loading badge */
+  .loading-badge {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 800;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--rule);
+    border-radius: 100px;
+    padding: 0.35rem 0.7rem 0.35rem 0.55rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+  }
+  .loading-badge.visible { display: inline-flex; }
+  .loading-badge::before {
+    content: '';
+    width: 12px; height: 12px;
+    border: 2px solid var(--rule);
+    border-top-color: var(--ink);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── MAP SEARCH ── */
+  .map-search {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 900;
+    width: 320px;
+    max-width: calc(100% - 130px);
+    font-family: 'Instrument Sans', sans-serif;
+  }
+  .map-search-input {
+    width: 100%;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    font-size: 0.85rem;
+    font-family: inherit;
+    color: var(--ink);
+  }
+  .map-search-input:focus {
+    outline: none;
+    border-color: var(--ink);
+    background: white;
+  }
+  .map-search-results {
+    background: white;
+    border: 1px solid var(--rule);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 260px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    display: none;
+  }
+  .map-search-results.visible { display: block; }
+  .search-result {
+    padding: 0.5rem 0.7rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.8rem;
+  }
+  .search-result:last-child { border-bottom: none; }
+  .search-result:hover, .search-result.selected { background: var(--mist); }
+  .search-result .sr-type {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.15rem;
+  }
+  .search-result .sr-title {
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .search-result .sr-sub {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+  }
+  @media (max-width: 600px) {
+    .map-search { left: 50px; right: 50px; transform: none; width: auto; max-width: none; top: 8px; }
+    .map-search-input { font-size: 0.8rem; padding: 0.4rem 0.6rem; }
+  }
 </style>
 </head>
 <body>
@@ -1151,6 +1261,12 @@
     <button class="sidebar-toggle" onclick="toggleSidebar()" title="Show events">☰ Events</button>
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
     <div id="map"></div>
+    <div class="map-search">
+      <input class="map-search-input" type="text" id="mapSearchInput"
+             placeholder="Search projects, postcodes, places…" autocomplete="off">
+      <div class="map-search-results" id="mapSearchResults"></div>
+    </div>
+    <div class="loading-badge" id="loadingBadge"><span id="loadingBadgeText">Loading…</span></div>
 
     <div class="table-view" id="tableView">
       <table id="dataTable">
@@ -1427,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch(e) { console.error('Redirect handle error', e); }
 
   initMap();
+  initMapSearch();
   updateWeekLabel();
   document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading staff list\u2026';
   showLoading(true);
@@ -1464,10 +1581,12 @@ let categoryOverlays = {};    // category name -> LayerGroup
 let basemapLayersConfig = {};
 
 function initMap() {
+  const isPhone = window.innerWidth <= 600;
   map = L.map('map', {
-    zoomControl: true,
+    zoomControl: false,    // we'll add it manually so we can choose the corner
     minZoom: 2,
   }).setView([54.5, -3], 6);
+  L.control.zoom({ position: isPhone ? 'bottomright' : 'topleft' }).addTo(map);
 
   // Basemap options
   basemapLayersConfig = {
@@ -1755,6 +1874,7 @@ async function ensureProjectLookup() {
   if (projectLookup) return projectLookup;
   if (_workbookLoading) return _workbookLoading;
   _workbookLoading = (async () => {
+    setLoading('Loading project locations…', true);
     try {
       const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
       if (!site) return {};
@@ -1819,6 +1939,8 @@ async function ensureProjectLookup() {
       showNotification('Could not load Won Projects workbook', 'error');
       projectLookup = {};
       return {};
+    } finally {
+      setLoading('Loading project locations…', false);
     }
   })();
   return _workbookLoading;
@@ -2132,11 +2254,15 @@ function renderSidebar() {
 function renderMap() {
   markerLayer.clearLayers();
   routeLayer.clearLayers();
-  // Group survey events by location (same project number, else same lat/lng)
+  // Group survey events by location:
+  // - by project number when present (collapses same project across attendees/days)
+  // - else by rounded lat/lng (~100m tolerance)
   const locations = {};
   surveyEvents.forEach(e => {
     if (!e.lat || !e.lng) return;
-    const key = e.projectNo ? `proj-${e.projectNo}` : `${e.lat.toFixed(4)},${e.lng.toFixed(4)}`;
+    const key = e.projectNo
+      ? `proj-${String(e.projectNo).trim()}`
+      : `${e.lat.toFixed(3)},${e.lng.toFixed(3)}`;
     if (!locations[key]) locations[key] = { lat: e.lat, lng: e.lng, events: [] };
     locations[key].events.push(e);
   });
@@ -2145,24 +2271,19 @@ function renderMap() {
     const events = loc.events;
     const persons = [...new Set(events.map(e => e.person))];
     const multiPerson = persons.length > 1;
+    // Pick a single colour: first person's, or a neutral dark green for multi-person
+    const baseColor = persons.length === 1 ? staffColor(persons[0]) : '#3b6b2d';
 
-    // Build marker SVG
-    const size = multiPerson ? 32 : 24;
-    const svgParts = persons.slice(0, 4).map((p, i) => {
-      const color = staffColor(p);
-      if (persons.length === 1) {
-        return `<circle cx="12" cy="12" r="10" fill="${color}" opacity="0.9"/>
-                <circle cx="12" cy="12" r="5" fill="white" opacity="0.6"/>`;
-      }
-      const angle = (i / persons.length) * 2 * Math.PI - Math.PI / 2;
-      const cx = 16 + 9 * Math.cos(angle);
-      const cy = 16 + 9 * Math.sin(angle);
-      return `<circle cx="${cx}" cy="${cy}" r="7" fill="${color}" opacity="0.9" stroke="white" stroke-width="1.5"/>`;
-    }).join('');
-    const extra = persons.length > 4 ? `<text x="${size/2}" y="${size/2+4}" text-anchor="middle" font-family="monospace" font-size="8" fill="#333">+${persons.length-4}</text>` : '';
+    // Build marker SVG — one solid dot, with a small count badge if multi-person
+    const size = 26;
+    const dot = `<circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${baseColor}" stroke="white" stroke-width="2"/>`;
+    const badge = multiPerson
+      ? `<circle cx="${size - 6}" cy="6" r="6" fill="white" stroke="${baseColor}" stroke-width="1.5"/>
+         <text x="${size - 6}" y="9" text-anchor="middle" font-family="DM Mono, monospace" font-size="8" font-weight="700" fill="${baseColor}">${persons.length}</text>`
+      : '';
 
     const svgIcon = L.divIcon({
-      html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${svgParts}${extra}</svg>`,
+      html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${dot}${badge}</svg>`,
       className: '',
       iconSize: [size, size],
       iconAnchor: [size/2, size/2],
@@ -2753,6 +2874,166 @@ async function geocodeAddress(addr) {
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════
+// MAP SEARCH (projects / postcodes / places)
+// ═══════════════════════════════════════════════════════════
+let _searchTimer = null;
+let _searchResults = [];
+let _searchSelectedIdx = -1;
+let _searchSeq = 0;   // ignore stale async results
+
+function initMapSearch() {
+  const input = document.getElementById('mapSearchInput');
+  const results = document.getElementById('mapSearchResults');
+  if (!input) return;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(_searchTimer);
+    if (!q) { hideSearchResults(); return; }
+    // Always show project matches immediately (synchronous)
+    const seq = ++_searchSeq;
+    const projects = searchProjects(q).slice(0, 8);
+    _searchResults = projects.map(p => ({ kind: 'project', ...p }));
+    renderSearchResults();
+    // Debounced free-text geocode (Nominatim) for fallback
+    _searchTimer = setTimeout(async () => {
+      const geo = await searchGeocode(q);
+      if (seq !== _searchSeq) return;
+      // Merge geocode results below projects
+      const existing = new Set(_searchResults.map(r => r.label));
+      geo.slice(0, 5).forEach(g => {
+        if (!existing.has(g.label)) _searchResults.push({ kind: 'place', ...g });
+      });
+      renderSearchResults();
+    }, 400);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!_searchResults.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _searchSelectedIdx = Math.min(_searchSelectedIdx + 1, _searchResults.length - 1);
+      renderSearchResults();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _searchSelectedIdx = Math.max(_searchSelectedIdx - 1, 0);
+      renderSearchResults();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const idx = _searchSelectedIdx >= 0 ? _searchSelectedIdx : 0;
+      pickSearchResult(idx);
+    } else if (e.key === 'Escape') {
+      hideSearchResults();
+    }
+  });
+
+  input.addEventListener('focus', () => {
+    if (_searchResults.length) results.classList.add('visible');
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.map-search')) hideSearchResults();
+  });
+}
+
+function searchProjects(q) {
+  if (!projectLookup) return [];
+  const qLower = q.toLowerCase();
+  const qDigits = q.replace(/\D/g, '');
+  const matches = [];
+  for (const num in projectLookup) {
+    const p = projectLookup[num];
+    let hit = false;
+    if (qDigits && num.startsWith(qDigits)) hit = true;
+    else if (p.site && p.site.toLowerCase().includes(qLower)) hit = true;
+    else if (p.town && p.town.toLowerCase().includes(qLower)) hit = true;
+    else if (p.county && p.county.toLowerCase().includes(qLower)) hit = true;
+    else if (p.postcode && p.postcode.replace(/\s+/g, '').toLowerCase().includes(qLower.replace(/\s+/g, ''))) hit = true;
+    if (hit && p.lat != null && p.lng != null) {
+      matches.push({
+        label: p.site || `Project ${num}`,
+        sub:   [num, p.town, p.county].filter(Boolean).join(' · '),
+        lat:   p.lat,
+        lng:   p.lng,
+        zoom:  14,
+      });
+    }
+  }
+  // Prefer prefix matches on project number first
+  matches.sort((a, b) => {
+    const aHasPrefix = a.sub.startsWith(qDigits || '~') ? -1 : 0;
+    const bHasPrefix = b.sub.startsWith(qDigits || '~') ? -1 : 0;
+    return aHasPrefix - bHasPrefix;
+  });
+  return matches;
+}
+
+async function searchGeocode(q) {
+  const out = [];
+  // Postcode match — show as a dedicated result
+  const pcMatch = q.match(/[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i);
+  if (pcMatch) {
+    const clean = pcMatch[0].replace(/\s+/g, '').toUpperCase();
+    try {
+      const r = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j.status === 200 && j.result) {
+          out.push({
+            label: clean,
+            sub:   `${j.result.admin_district || ''}, UK`,
+            lat:   j.result.latitude,
+            lng:   j.result.longitude,
+            zoom:  15,
+          });
+        }
+      }
+    } catch {}
+  }
+  // Free-text → Nominatim
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', UK')}&format=json&limit=5&countrycodes=gb,ie`);
+    if (r.ok) {
+      const j = await r.json();
+      j.forEach(item => {
+        out.push({
+          label: item.display_name.split(',')[0],
+          sub:   item.display_name,
+          lat:   parseFloat(item.lat),
+          lng:   parseFloat(item.lon),
+          zoom:  13,
+        });
+      });
+    }
+  } catch {}
+  return out;
+}
+
+function renderSearchResults() {
+  const box = document.getElementById('mapSearchResults');
+  if (!_searchResults.length) { box.classList.remove('visible'); return; }
+  box.classList.add('visible');
+  box.innerHTML = _searchResults.map((r, i) => `
+    <div class="search-result ${i === _searchSelectedIdx ? 'selected' : ''}" onclick="pickSearchResult(${i})">
+      <div class="sr-type">${r.kind === 'project' ? '🏗 Project' : '📍 Place'}</div>
+      <div class="sr-title">${escapeHtml(r.label)}</div>
+      ${r.sub ? `<div class="sr-sub">${escapeHtml(r.sub)}</div>` : ''}
+    </div>`).join('');
+}
+
+function pickSearchResult(i) {
+  const r = _searchResults[i];
+  if (!r) return;
+  map.flyTo([r.lat, r.lng], r.zoom || 13, { duration: 0.8 });
+  document.getElementById('mapSearchInput').value = r.label;
+  hideSearchResults();
+}
+
+function hideSearchResults() {
+  _searchSelectedIdx = -1;
+  document.getElementById('mapSearchResults').classList.remove('visible');
+}
+
 // ── Graph mutation helper ──────────────────────────────────
 async function graphMutate(method, path, body) {
   const token = await getGraphToken();
@@ -2941,6 +3222,13 @@ function renderGrid() {
       const dISO = fmtDateLocal(d);
       const isToday = dISO === todayISO;
       const evs = eventsBy[s.name + '|' + dISO] || [];
+      // Identify a dominant full-day event type for the cell
+      const fullDay = evs.find(e => e.type === 'Office' || e.type === 'WFH' || e.type === 'Leave');
+      let cellBg = '';
+      if (fullDay) {
+        const tint = { 'Office': '#dbe9f9', 'WFH': '#fbf3cf', 'Leave': '#f6dccb' }[fullDay.type];
+        if (tint) cellBg = `background:${tint};`;
+      }
       // Sort: surveys first (by start time), then full-day events
       evs.sort((a, b) => {
         const aSurvey = isSurveyType(a.type) ? 0 : 1;
@@ -2948,20 +3236,21 @@ function renderGrid() {
         if (aSurvey !== bSurvey) return aSurvey - bSurvey;
         return (a.startISO || '').localeCompare(b.startISO || '');
       });
-      html += `<td class="${isToday?'today':''}">`;
+      html += `<td class="${isToday?'today':''}" style="${cellBg}">`;
       evs.forEach(e => {
         const color = typeColor(e.type);
         const loc = e.town || e.county || '';
         const title = (e.title || '').replace(/^(SURVEY|MEETING)\s*–\s*/i,'');
         const isSurvey = isSurveyType(e.type);
         const vehLine = e.vehicle ? `<div class="grid-event-veh">🚗 ${escapeHtml(e.vehicle)}</div>` : '';
-        const body = isSurvey
-          ? `${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
+        if (isSurvey) {
+          const body = `${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
              ${title ? `<div>${title.substring(0, 40)}</div>` : ''}
              ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}
-             ${vehLine}`
-          : `<div style="font-weight:600">${e.type}</div>`;
-        html += `<div class="grid-event" style="background:${color}" onclick="focusEvent('${e.id}')">${body}</div>`;
+             ${vehLine}`;
+          html += `<div class="grid-event" style="background:${color}" onclick="focusEvent('${e.id}')">${body}</div>`;
+        }
+        // Don't render Office / WFH / Leave as chips — the cell tint is enough
       });
       html += '</td>';
     });
@@ -3043,6 +3332,20 @@ function formatDateShort(dateStr) {
 
 function showLoading(show) {
   document.getElementById('loadingOverlay').classList.toggle('hidden', !show);
+}
+
+const _loadingTasks = new Set();
+function setLoading(name, on) {
+  if (on) _loadingTasks.add(name);
+  else    _loadingTasks.delete(name);
+  const badge = document.getElementById('loadingBadge');
+  const text  = document.getElementById('loadingBadgeText');
+  if (_loadingTasks.size > 0) {
+    text.textContent = [..._loadingTasks][0];
+    badge.classList.add('visible');
+  } else {
+    badge.classList.remove('visible');
+  }
 }
 
 function showNotification(msg, type='ok') {
