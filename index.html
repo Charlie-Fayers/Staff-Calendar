@@ -1187,16 +1187,26 @@ async function ensureProjectLookup() {
   if (_workbookLoading) return _workbookLoading;
   _workbookLoading = (async () => {
     try {
-      // Resolve workbook site by hostname:path
       const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
       if (!site) return {};
-      const drive = await graphFetch(`/sites/${site.id}/drive`);
-      const driveId = drive.id;
-      // Find the workbook
-      const search = await graphFetch(`/drives/${driveId}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
-      const file = (search.value || []).find(f => f.name === CONFIG.workbookName);
+      // List all drives on the site and search each for the workbook
+      const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
+      const drives = drivesRes.value || [];
+      let file = null, driveId = null;
+      for (const d of drives) {
+        try {
+          const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
+          const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
+          if (match) {
+            file = match;
+            driveId = d.id;
+            console.log(`Found workbook in drive "${d.name}"`);
+            break;
+          }
+        } catch(e) { console.warn(`Search in drive "${d.name}" failed`, e); }
+      }
       if (!file) {
-        showNotification('Won Projects workbook not found', 'error');
+        showNotification('Won Projects workbook not found on Data site', 'error');
         return {};
       }
       // Used range from the named sheet
