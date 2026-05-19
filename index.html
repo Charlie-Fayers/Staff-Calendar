@@ -1257,14 +1257,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function initMap() {
-  // UK & Ireland bounding box
-  const ukBounds = L.latLngBounds([49.5, -10.8], [60.9, 2.0]);
   map = L.map('map', {
     zoomControl: true,
-    maxBounds: ukBounds,
-    maxBoundsViscosity: 1.0,
-    minZoom: 5,
-  }).fitBounds(ukBounds);
+    minZoom: 2,
+  }).setView([54.5, -3], 6);
 
   // Basemap options
   const basemaps = {
@@ -1811,15 +1807,12 @@ function renderMap() {
 
   // Fit bounds only on first render (or when user clicks "Reset view");
   // preserve user zoom/pan on subsequent renders.
-  const ukBounds = L.latLngBounds([49.5, -10.8], [60.9, 2.0]);
   const latlngs = Object.values(locations).map(l => [l.lat, l.lng]);
   if (!mapInitialised) {
     if (latlngs.length > 1) {
       map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 12 });
     } else if (latlngs.length === 1) {
       map.setView(latlngs[0], 10);
-    } else {
-      map.fitBounds(ukBounds);
     }
     mapInitialised = true;
   }
@@ -1934,13 +1927,13 @@ async function loadPointsAndCategories() {
       color: it.fields?.Color || '#7f8c8d',
       icon:  it.fields?.Icon || '•',
     })).filter(c => c.name);
-    // Default: all categories on. Preserve any user toggles from before.
-    const existing = new Set(activeCategories);
-    activeCategories = new Set(
-      categories.map(c => c.name)
-        .filter(n => existing.size === 0 || existing.has(n))
-    );
-    if (existing.size === 0) categories.forEach(c => activeCategories.add(c.name));
+    // Default: all categories OFF. Preserve any user toggles from earlier in this session.
+    if (activeCategories.size > 0) {
+      // Keep only those that still exist
+      const valid = new Set(categories.map(c => c.name));
+      activeCategories = new Set([...activeCategories].filter(n => valid.has(n)));
+    }
+    // (If activeCategories is still empty, that's fine — nothing visible by default.)
     manualPoints = (ptData?.value || []).map(it => {
       const f = it.fields || {};
       return {
@@ -1972,10 +1965,10 @@ function renderPointsLayer() {
   manualPoints.forEach(p => {
     if (!activeCategories.has(p.category)) return;
     const cat = categoryByName(p.category);
-    const size = 26;
+    const size = 20;
     const html = `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${cat.color};
-      color:white;font-size:0.85rem;font-weight:600;display:flex;align-items:center;
-      justify-content:center;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);">${cat.icon}</div>`;
+      color:white;font-size:0.7rem;font-weight:600;display:flex;align-items:center;
+      justify-content:center;border:1.5px solid white;box-shadow:0 1px 2px rgba(0,0,0,0.25);">${cat.icon}</div>`;
     const icon = L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
     const popupHtml = `
       <div style="font-family:'Instrument Sans',sans-serif">
@@ -1991,8 +1984,27 @@ function renderPointsLayer() {
         permanent: true, direction: 'right',
         offset: [size/2 + 2, 0], className: 'point-label',
       });
+    // Apply category color tint to label background after it's added
+    marker.on('add', () => {
+      const tip = marker.getTooltip();
+      if (tip && tip.getElement) {
+        const el = tip.getElement();
+        if (el) {
+          el.style.background = hexToRgba(cat.color, 0.18);
+          el.style.borderColor = hexToRgba(cat.color, 0.5);
+        }
+      }
+    });
     pointsLayer.addLayer(marker);
   });
+}
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function escapeHtml(s) {
