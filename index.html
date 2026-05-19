@@ -145,6 +145,32 @@
   }
   .week-nav button:hover { background: var(--ink); color: var(--white); }
 
+  .day-filter {
+    display: flex;
+    gap: 0.2rem;
+    flex-wrap: nowrap;
+  }
+  .day-filter-chip {
+    padding: 0.2rem 0.35rem;
+    border: 1px solid var(--rule);
+    background: white;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 2px;
+    min-width: 2.1rem;
+    text-align: center;
+    line-height: 1.1;
+  }
+  .day-filter-chip:hover { color: var(--ink); border-color: var(--ink); }
+  .day-filter-chip.active {
+    background: var(--ink);
+    color: var(--white);
+    border-color: var(--ink);
+  }
+
   .week-label {
     font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
@@ -351,6 +377,20 @@
     border-radius: 2px;
     font-size: 0.6rem;
   }
+  .event-meta .vehicle-tag {
+    background: #eef5ff;
+    color: #1a4d8c;
+    border: 1px solid #c5dafb;
+    padding: 0.05rem 0.35rem;
+    border-radius: 2px;
+    font-size: 0.6rem;
+  }
+  table.week-grid .grid-event-veh {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    opacity: 0.92;
+    margin-top: 0.1rem;
+  }
   .event-meta .warn-tag {
     background: #fff3cd;
     color: #856404;
@@ -483,8 +523,7 @@
     border-radius: 2px;
   }
 
-  /* Routes toggle button active state */
-  #routesToggle.active,
+  /* Toolbar toggle button active state */
   #pointsToggle.active {
     background: var(--ink) !important;
     color: var(--white);
@@ -552,6 +591,31 @@
   }
   .link-btn.danger { color: #b54040; }
   .points-list, .cats-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .points-filter {
+    margin-bottom: 0.6rem;
+  }
+  .points-filter label {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    font-family: 'DM Mono', monospace; font-size: 0.6rem;
+    letter-spacing: 0.04em; color: var(--text-secondary);
+    text-transform: uppercase;
+  }
+  .points-filter select {
+    border: 1px solid var(--rule); border-radius: 3px;
+    padding: 0.35rem 0.45rem; font-family: 'Instrument Sans', sans-serif;
+    font-size: 0.8rem; color: var(--ink);
+  }
+  .point-arrows {
+    display: flex; flex-direction: column; gap: 1px;
+    flex-shrink: 0;
+  }
+  .arrow-btn {
+    background: none; border: 1px solid var(--rule); border-radius: 2px;
+    padding: 0 0.25rem; cursor: pointer; font-size: 0.55rem;
+    color: var(--text-secondary); line-height: 1.1;
+  }
+  .arrow-btn:hover:not(:disabled) { background: var(--mist); color: var(--ink); }
+  .arrow-btn:disabled { opacity: 0.3; cursor: default; }
   .point-row, .cat-row {
     display: flex; align-items: center; gap: 0.6rem;
     padding: 0.5rem 0.65rem;
@@ -929,13 +993,13 @@
     <button onclick="changeWeek(1)">›</button>
     <button onclick="goToThisWeek()" style="font-family:'DM Mono',monospace;font-size:0.65rem;width:auto;padding:0 0.6rem;letter-spacing:0.04em;">Today</button>
   </div>
+  <div class="day-filter" id="dayFilter"></div>
   <div class="view-toggle">
     <button class="active" onclick="setView('map')" id="btnMap">Map</button>
     <button onclick="setView('grid')" id="btnGrid">Calendar</button>
     <button onclick="setView('table')" id="btnTable">List</button>
   </div>
-  <button id="routesToggle" onclick="toggleRoutes()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">↝ Routes</button>
-  <button id="pointsToggle" onclick="togglePointsPanel()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">◉ Points</button>
+  <button id="pointsToggle" onclick="togglePointsPanel()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">◉ Edit Locations</button>
   <div class="filter-label">Staff:</div>
   <div class="staff-filter" id="staffFilter"></div>
 </div>
@@ -1005,6 +1069,13 @@
           Click on the map to choose a location, or
           <button class="link-btn" onclick="openAddByAddress()">enter an address</button>.
           <button class="link-btn" onclick="cancelAddPoint()">Cancel</button>
+        </div>
+        <div class="points-filter">
+          <label>Filter by category
+            <select id="pointsCatFilter" onchange="renderPointsList()">
+              <option value="">All categories</option>
+            </select>
+          </label>
         </div>
         <div class="points-list" id="pointsList"></div>
       </div>
@@ -1087,6 +1158,7 @@ const CONFIG = {
   siteId:                'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
   staffListName:         'Staff',
   calendarListName:      'StaffCalendarCache',
+  vehiclesListName:      'VehicleBookingsCache',
   pointsListName:        'ManualPoints',
   categoriesListName:    'ManualPointCategories',
 
@@ -1204,6 +1276,7 @@ const DEMO_EVENTS = [
 let currentWeekStart = getWeekStart(new Date());
 let allEvents = [];
 let filteredEvents = [];
+let dayFilter = null;        // ISO date string (yyyy-mm-dd) or null for whole week
 let staffList = [];
 let activeStaff = new Set();
 let currentView = 'map';
@@ -1256,6 +1329,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadPointsAndCategories();   // load in background; renders to map when ready
 });
 
+let layersControl = null;
+let routesOverlay = null;     // a LayerGroup that, when present in the map, means routes are visible
+let categoryOverlays = {};    // category name -> LayerGroup
+let basemapLayersConfig = {};
+
 function initMap() {
   map = L.map('map', {
     zoomControl: true,
@@ -1263,7 +1341,7 @@ function initMap() {
   }).setView([54.5, -3], 6);
 
   // Basemap options
-  const basemaps = {
+  basemapLayersConfig = {
     'Light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '© OpenStreetMap © CARTO', maxZoom: 19, subdomains: 'abcd'
     }),
@@ -1283,12 +1361,82 @@ function initMap() {
       })
     ]),
   };
-  basemaps['Light'].addTo(map);
-  L.control.layers(basemaps, null, { position: 'topright', collapsed: true }).addTo(map);
+  basemapLayersConfig['Light'].addTo(map);
 
   markerLayer = L.layerGroup().addTo(map);
-  routeLayer = L.layerGroup().addTo(map);
+  routeLayer = L.layerGroup();           // not added by default
+
+  // "Routes" overlay layer — a placeholder we just toggle on/off; renderRoutes uses routeLayer
+  routesOverlay = routeLayer;
+
+  rebuildLayersControl();
+
+  // Track overlay add/remove to wire behavior
+  map.on('overlayadd', e => {
+    if (e.layer === routesOverlay) {
+      showRoutes = true;
+      renderRoutes();
+    } else {
+      // It's a category overlay — find which one
+      for (const cat in categoryOverlays) {
+        if (categoryOverlays[cat] === e.layer) {
+          activeCategories.add(cat);
+          renderPointsLayer();
+          renderCategoriesList();
+          break;
+        }
+      }
+    }
+  });
+  map.on('overlayremove', e => {
+    if (e.layer === routesOverlay) {
+      showRoutes = false;
+      routeLayer.clearLayers();
+    } else {
+      for (const cat in categoryOverlays) {
+        if (categoryOverlays[cat] === e.layer) {
+          activeCategories.delete(cat);
+          renderPointsLayer();
+          renderCategoriesList();
+          break;
+        }
+      }
+    }
+  });
+
   attachMapClickForAdd();
+}
+
+function rebuildLayersControl() {
+  if (layersControl) { map.removeControl(layersControl); }
+  const overlays = { 'Routes (office → sites)': routesOverlay };
+  // For each category, get-or-create an empty layer group to use as a switch
+  categories.forEach(c => {
+    if (!categoryOverlays[c.name]) {
+      categoryOverlays[c.name] = L.layerGroup();
+    }
+    overlays[`${c.icon} ${c.name}`] = categoryOverlays[c.name];
+  });
+  layersControl = L.control.layers(basemapLayersConfig, overlays, {
+    position: 'topright',
+    collapsed: true,
+  }).addTo(map);
+  // Sync overlay checkbox state with active state
+  syncLayersControlState();
+}
+
+function syncLayersControlState() {
+  // Add active category groups to map (so the checkbox is ticked)
+  Object.keys(categoryOverlays).forEach(cat => {
+    const layer = categoryOverlays[cat];
+    if (activeCategories.has(cat)) {
+      if (!map.hasLayer(layer)) map.addLayer(layer);
+    } else {
+      if (map.hasLayer(layer)) map.removeLayer(layer);
+    }
+  });
+  if (showRoutes && !map.hasLayer(routesOverlay)) map.addLayer(routesOverlay);
+  if (!showRoutes && map.hasLayer(routesOverlay)) map.removeLayer(routesOverlay);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1597,11 +1745,16 @@ async function fetchSharePointData() {
   const listId = await getListId(CONFIG.calendarListName);
   const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
   const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
-  const data = await graphFetch(path);
+  const [data, vehicles] = await Promise.all([
+    graphFetch(path),
+    fetchVehicleBookings(),
+  ]);
   if (!data) return [];
   // Use whatever's already in the workbook lookup (may be empty on first run)
   const lookup = projectLookup || {};
   const events = data.value.map(item => mapEventItem(item, lookup));
+  // Attach vehicle bookings
+  attachVehicles(events, vehicles);
 
   // If lookup isn't ready yet, kick it off in background and re-render when it lands
   if (!projectLookup) {
@@ -1620,10 +1773,16 @@ async function fetchSharePointData() {
           e._hasValidPostcode = isValidPostcode(en.postcode);
         });
       });
-      renderSidebar();
-      renderMap();
-      renderTable();
-      if (currentView === 'grid') renderGrid();
+      // Re-run vehicle matching (vehicles may have loaded async too)
+      fetchVehicleBookings().then(v => {
+        attachVehicles(allEvents, v);
+        attachVehicles(surveyEvents, v);
+        attachVehicles(filteredEvents, v);
+        renderSidebar();
+        renderMap();
+        renderTable();
+        if (currentView === 'grid') renderGrid();
+      });
       showNotification('Locations loaded', 'ok');
     }).catch(e => console.error('Background workbook load failed', e));
   }
@@ -1649,6 +1808,7 @@ function mapEventItem(item, lookup) {
     lat:       enriched && enriched.lat != null ? Number(enriched.lat) : NaN,
     lng:       enriched && enriched.lng != null ? Number(enriched.lng) : NaN,
     type:      f.EventType || 'Survey',
+    vehicle:   '',
     _projInLookup:    !!enriched,
     _hasPostcode:     !!(enriched && enriched.postcode),
     _hasValidPostcode: !!(enriched && isValidPostcode(enriched.postcode)),
@@ -1661,6 +1821,71 @@ function extractProjectNo(str) {
   return m ? m[1] : null;
 }
 
+// ── Vehicle bookings ───────────────────────────────────────
+let _vehicleBookings = null;
+async function fetchVehicleBookings() {
+  // One-off per session (whole window is small)
+  if (_vehicleBookings !== null) return _vehicleBookings;
+  try {
+    // Pull a wide window — same as the calendar sync, default 120 days
+    const listId = await getListId(CONFIG.vehiclesListName);
+    const data = await graphFetch(
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999`);
+    if (!data) { _vehicleBookings = []; return _vehicleBookings; }
+    _vehicleBookings = data.value.map(it => {
+      const f = it.fields || {};
+      return {
+        title:   f.Title || '',
+        vehicle: f.VehicleName || '',
+        start:   f.StartDate ? new Date(f.StartDate) : null,
+        end:     f.EndDate   ? new Date(f.EndDate)   : null,
+      };
+    }).filter(b => b.start && b.end && b.vehicle);
+    return _vehicleBookings;
+  } catch(e) {
+    // List may not exist yet — fail silently
+    console.warn('Vehicle bookings unavailable:', e.message);
+    _vehicleBookings = [];
+    return _vehicleBookings;
+  }
+}
+
+// Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
+function initialsForName(name) {
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
+  const first = parts[0][0].toUpperCase();
+  const last = parts[parts.length - 1];
+  const short = first + last[0].toUpperCase();          // CF
+  const long  = first + last.substring(0, 2).toUpperCase(); // CFA
+  return [short, long];
+}
+
+function attachVehicles(events, bookings) {
+  if (!bookings || !bookings.length) return;
+  events.forEach(e => {
+    if (!isSurveyType(e.type)) return;
+    const eventDate = new Date(e.date);
+    if (isNaN(eventDate)) return;
+    const initials = initialsForName(e.person);
+    // Window: booking can start up to 1 day before event and end up to 1 day after
+    const dayMs = 86400000;
+    const evDayStart = new Date(eventDate); evDayStart.setHours(0,0,0,0);
+    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23,59,59,999);
+    const matchable = bookings.filter(b =>
+      (b.end.getTime() + dayMs) >= evDayStart.getTime() &&
+      (b.start.getTime() - dayMs) <= evDayEnd.getTime()
+    );
+    if (!matchable.length) return;
+    // Prefer one whose title contains the staff initials as a token
+    const initialMatch = matchable.find(b => {
+      const upper = b.title.toUpperCase();
+      return initials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
+    });
+    e.vehicle = (initialMatch || matchable[0]).vehicle;
+  });
+}
+
 // ═══════════════════════════════════════════════════════════
 // RENDERING
 // ═══════════════════════════════════════════════════════════
@@ -1670,12 +1895,16 @@ function isSurveyType(t) {
 }
 
 function renderAll() {
+  buildDayFilter();
   const ws = currentWeekStart;
   const we = getWeekEnd(ws);
   const validStaff = new Set(staffList.map(s => s.name));
   filteredEvents = allEvents.filter(e => {
     const d = new Date(e.date);
-    return d >= ws && d <= we && activeStaff.has(e.person) && validStaff.has(e.person);
+    if (!(d >= ws && d <= we)) return false;
+    if (!activeStaff.has(e.person) || !validStaff.has(e.person)) return false;
+    if (dayFilter && e.date !== dayFilter) return false;
+    return true;
   });
   surveyEvents = filteredEvents.filter(e => isSurveyType(e.type));
   updateStats();
@@ -1683,6 +1912,30 @@ function renderAll() {
   renderMap();
   renderTable();
   if (currentView === 'grid') renderGrid();
+}
+
+function buildDayFilter() {
+  const container = document.getElementById('dayFilter');
+  if (!container) return;
+  const ws = currentWeekStart;
+  let html = `<button class="day-filter-chip ${!dayFilter ? 'active' : ''}" onclick="setDayFilter(null)">All</button>`;
+  const todayISO = fmtDateLocal(new Date());
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ws);
+    d.setDate(d.getDate() + i);
+    const iso = fmtDateLocal(d);
+    const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    const day = d.getDate();
+    const isActive = dayFilter === iso;
+    const isToday = iso === todayISO;
+    html += `<button class="day-filter-chip ${isActive ? 'active' : ''}" title="${dow} ${day}" onclick="setDayFilter('${iso}')">${dow}<br><span style="font-size:0.65rem">${day}${isToday ? '•' : ''}</span></button>`;
+  }
+  container.innerHTML = html;
+}
+
+function setDayFilter(iso) {
+  dayFilter = iso;
+  renderAll();
 }
 
 function updateStats() {
@@ -1715,6 +1968,7 @@ function renderSidebar() {
       const color = staffColor(e.person);
       const locTag = e.town ? `<span class="location-tag">◎ ${e.town}${e.county?', '+e.county:''}</span>` : '';
       const projBadge = e.projectNo ? `<span class="proj-badge">${e.projectNo}</span>` : '';
+      const vehTag = e.vehicle ? `<span class="vehicle-tag">🚗 ${escapeHtml(e.vehicle)}</span>` : '';
       const noGeo = (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng));
       let warnTag = '';
       if (noGeo) {
@@ -1737,7 +1991,7 @@ function renderSidebar() {
         <div class="event-body">
           <div class="event-person" style="color:${color}">${e.person}</div>
           <div class="event-title">${e.title}</div>
-          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>${warnTag}</div>
+          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>${vehTag}${warnTag}</div>
         </div>
       </div>`;
     });
@@ -1749,11 +2003,11 @@ function renderSidebar() {
 function renderMap() {
   markerLayer.clearLayers();
   routeLayer.clearLayers();
-  // Group survey events by location (same lat/lng)
+  // Group survey events by location (same project number, else same lat/lng)
   const locations = {};
   surveyEvents.forEach(e => {
     if (!e.lat || !e.lng) return;
-    const key = `${e.lat.toFixed(4)},${e.lng.toFixed(4)}`;
+    const key = e.projectNo ? `proj-${e.projectNo}` : `${e.lat.toFixed(4)},${e.lng.toFixed(4)}`;
     if (!locations[key]) locations[key] = { lat: e.lat, lng: e.lng, events: [] };
     locations[key].events.push(e);
   });
@@ -1785,13 +2039,15 @@ function renderMap() {
       iconAnchor: [size/2, size/2],
     });
 
-    // Label: staff (short) + dates + town
+    // Label: staff (short) + dates + town + vehicle
     const labelStaff = persons.length === 1 ? shortName(persons[0])
                     : persons.length === 2 ? persons.map(shortName).join(' & ')
                     : `${shortName(persons[0])} +${persons.length - 1}`;
     const dates = [...new Set(events.map(e => e.date))].sort();
     const dateRange = formatDateRange(dates);
-    const labelText = `${labelStaff} · ${dateRange}` + (events[0].town ? ' · ' + events[0].town : '');
+    const uniqueVehicles = [...new Set(events.map(e => e.vehicle).filter(Boolean))];
+    const vehicleText = uniqueVehicles.length ? ' · 🚗 ' + uniqueVehicles.join('/') : '';
+    const labelText = `${labelStaff} · ${dateRange}` + (events[0].town ? ' · ' + events[0].town : '') + vehicleText;
 
     const popupContent = buildPopup(loc, persons);
     const marker = L.marker([loc.lat, loc.lng], { icon: svgIcon })
@@ -1944,10 +2200,14 @@ async function loadPointsAndCategories() {
         lng:      parseFloat(f.Longitude),
         address:  f.Address || '',
         notes:    f.Notes || '',
+        sortOrder: f.SortOrder != null && f.SortOrder !== '' ? parseFloat(f.SortOrder) : 1000 + parseFloat(it.id || 0),
       };
     }).filter(p => !isNaN(p.lat) && !isNaN(p.lng));
+    // Sort by SortOrder then label for tie-breaking
+    manualPoints.sort((a, b) => (a.sortOrder - b.sortOrder) || a.label.localeCompare(b.label));
     renderPointsList();
     renderCategoriesList();
+    rebuildLayersControl();
     renderPointsLayer();
   } catch(e) {
     console.error('Points/categories load failed', e);
@@ -2027,22 +2287,77 @@ function switchPointsTab(tab) {
 }
 
 function renderPointsList() {
+  // Rebuild category filter dropdown options
+  const filter = document.getElementById('pointsCatFilter');
+  if (filter) {
+    const sel = filter.value;
+    filter.innerHTML = '<option value="">All categories</option>' +
+      categories.map(c => `<option value="${escapeHtml(c.name)}" ${c.name === sel ? 'selected' : ''}>${c.icon} ${escapeHtml(c.name)}</option>`).join('');
+  }
+  const filterVal = filter ? filter.value : '';
+
   const c = document.getElementById('pointsList');
-  if (!manualPoints.length) {
-    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No points yet. Click "Add point" to create one.</div>';
+  const points = filterVal ? manualPoints.filter(p => p.category === filterVal) : manualPoints;
+  if (!points.length) {
+    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No points to show.</div>';
     return;
   }
-  c.innerHTML = manualPoints.map(p => {
+  c.innerHTML = points.map((p, idx) => {
     const cat = categoryByName(p.category);
-    return `<div class="point-row" onclick="focusPoint('${p.id}')">
+    const isFirst = idx === 0;
+    const isLast = idx === points.length - 1;
+    return `<div class="point-row">
+      <div class="point-arrows">
+        <button class="arrow-btn" ${isFirst ? 'disabled' : ''} onclick="event.stopPropagation();movePoint('${p.id}',-1)" title="Move up">▲</button>
+        <button class="arrow-btn" ${isLast ? 'disabled' : ''} onclick="event.stopPropagation();movePoint('${p.id}',1)" title="Move down">▼</button>
+      </div>
       <div class="point-row-swatch" style="background:${cat.color}">${cat.icon}</div>
-      <div class="point-row-body">
+      <div class="point-row-body" onclick="focusPoint('${p.id}')">
         <div class="point-row-label">${escapeHtml(p.label)}</div>
         <div class="point-row-cat">${escapeHtml(p.category)}</div>
       </div>
       <button class="link-btn" onclick="event.stopPropagation();openEditPoint('${p.id}')">Edit</button>
     </div>`;
   }).join('');
+}
+
+async function movePoint(id, direction) {
+  const filter = document.getElementById('pointsCatFilter');
+  const filterVal = filter ? filter.value : '';
+  const visible = filterVal ? manualPoints.filter(p => p.category === filterVal) : manualPoints;
+  const idx = visible.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= visible.length) return;
+
+  // Swap sortOrder values of the two visible neighbours
+  const a = visible[idx];
+  const b = visible[newIdx];
+  const tmp = a.sortOrder;
+  a.sortOrder = b.sortOrder;
+  b.sortOrder = tmp;
+  // If they ended up equal (e.g. both defaults), nudge so order is stable
+  if (a.sortOrder === b.sortOrder) {
+    if (direction < 0) a.sortOrder -= 0.5;
+    else               a.sortOrder += 0.5;
+  }
+  // Persist both
+  try {
+    const listId = await getListId(CONFIG.pointsListName);
+    await Promise.all([
+      graphMutate('PATCH',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${a.id}/fields`,
+        { SortOrder: String(a.sortOrder) }),
+      graphMutate('PATCH',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${b.id}/fields`,
+        { SortOrder: String(b.sortOrder) }),
+    ]);
+    manualPoints.sort((x, y) => (x.sortOrder - y.sortOrder) || x.label.localeCompare(y.label));
+    renderPointsList();
+  } catch(e) {
+    console.error(e);
+    showNotification('Failed to reorder', 'error');
+  }
 }
 
 function renderCategoriesList() {
@@ -2355,7 +2670,8 @@ function buildPopup(loc, persons) {
     const lines = theirs.map(e => {
       const t = formatTimeRange(e.startISO, e.endISO);
       const d = formatDateRange([e.date]);
-      return `<div class="popup-attend-line">${d}${t?' · '+t:''}</div>`;
+      const v = e.vehicle ? ` · 🚗 ${escapeHtml(e.vehicle)}` : '';
+      return `<div class="popup-attend-line">${d}${t?' · '+t:''}${v}</div>`;
     }).join('');
     return `<div class="popup-attendee">
       <span class="popup-person-chip" style="background:${staffColor(p)}">${p}</span>
@@ -2428,17 +2744,28 @@ function renderGrid() {
   const container = document.getElementById('gridScroll');
   const ws = currentWeekStart;
   const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(ws);
-    d.setDate(d.getDate() + i);
-    days.push(d);
+  if (dayFilter) {
+    days.push(new Date(dayFilter));
+  } else {
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(ws);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
   }
   const todayISO = fmtDateLocal(new Date());
-  const validStaff = staffList.filter(s => activeStaff.has(s.name));
+  // Calendar view shows ALL staff (not just those active in chip filter or on site)
+  const validStaff = staffList.slice();
 
-  // Index events by person+date — use filteredEvents (all types) for calendar
+  // Index events by person+date — use ALL events in the week, not just filteredEvents
+  const ws_end = getWeekEnd(currentWeekStart);
+  const validStaffNames = new Set(staffList.map(s => s.name));
+  const weekEvents = allEvents.filter(e => {
+    const d = new Date(e.date);
+    return d >= currentWeekStart && d <= ws_end && validStaffNames.has(e.person);
+  });
   const eventsBy = {};
-  filteredEvents.forEach(e => {
+  weekEvents.forEach(e => {
     const k = e.person + '|' + e.date;
     if (!eventsBy[k]) eventsBy[k] = [];
     eventsBy[k].push(e);
@@ -2484,10 +2811,12 @@ function renderGrid() {
         const loc = e.town || e.county || '';
         const title = (e.title || '').replace(/^(SURVEY|MEETING)\s*–\s*/i,'');
         const isSurvey = isSurveyType(e.type);
+        const vehLine = e.vehicle ? `<div class="grid-event-veh">🚗 ${escapeHtml(e.vehicle)}</div>` : '';
         const body = isSurvey
           ? `${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
              ${title ? `<div>${title.substring(0, 40)}</div>` : ''}
-             ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}`
+             ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}
+             ${vehLine}`
           : `<div style="font-weight:600">${e.type}</div>`;
         html += `<div class="grid-event" style="background:${color}" onclick="focusEvent('${e.id}')">${body}</div>`;
       });
@@ -2503,9 +2832,10 @@ function changeWeek(dir) {
   const d = new Date(currentWeekStart);
   d.setDate(d.getDate() + dir * 7);
   currentWeekStart = d;
+  dayFilter = null;   // reset day filter on week change
   updateWeekLabel();
   if (CONFIG.useLiveData) {
-    loadData();   // refetch for the new week's range
+    loadData();
   } else {
     renderAll();
   }
@@ -2513,6 +2843,7 @@ function changeWeek(dir) {
 
 function goToThisWeek() {
   currentWeekStart = getWeekStart(new Date());
+  dayFilter = null;
   updateWeekLabel();
   if (CONFIG.useLiveData) {
     loadData();
