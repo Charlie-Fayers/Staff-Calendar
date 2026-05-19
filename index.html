@@ -462,13 +462,188 @@
     font-size: 0.62rem;
     opacity: 0.92;
   }
+  .grid-legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+  }
+  .grid-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .grid-legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
 
   /* Routes toggle button active state */
-  #routesToggle.active {
+  #routesToggle.active,
+  #pointsToggle.active {
     background: var(--ink) !important;
     color: var(--white);
     border-color: var(--ink);
   }
+
+  /* ── POINTS PANEL ── */
+  .points-panel {
+    position: absolute;
+    top: 0; right: -360px;
+    width: 360px; height: 100%;
+    background: var(--white);
+    border-left: 1px solid var(--rule);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    transition: right 0.25s ease;
+    font-family: 'Instrument Sans', sans-serif;
+    box-shadow: -2px 0 8px rgba(0,0,0,0.06);
+  }
+  .points-panel.visible { right: 0; }
+  .points-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .points-close, .modal-close {
+    background: none; border: none; font-size: 1.5rem; line-height: 1;
+    cursor: pointer; color: var(--text-secondary);
+  }
+  .points-close:hover, .modal-close:hover { color: var(--ink); }
+  .points-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--rule);
+  }
+  .points-tab {
+    flex: 1; padding: 0.65rem; background: none; border: none;
+    font-family: 'DM Mono', monospace; font-size: 0.65rem;
+    letter-spacing: 0.05em; cursor: pointer; color: var(--text-secondary);
+    border-bottom: 2px solid transparent;
+  }
+  .points-tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .points-tab-body { flex: 1; overflow-y: auto; padding: 0.85rem 1.1rem; }
+  .add-btn {
+    width: 100%; padding: 0.55rem; margin-bottom: 0.8rem;
+    background: var(--ink); color: var(--white); border: none;
+    font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0.04em;
+    cursor: pointer; border-radius: 3px;
+  }
+  .add-btn:hover { background: #000; }
+  .add-mode-hint {
+    background: #fff7e0; border: 1px solid #f0d58a; border-radius: 3px;
+    padding: 0.55rem 0.7rem; font-size: 0.72rem; margin-bottom: 0.8rem;
+    color: #6b5a2d;
+  }
+  .link-btn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--ink); text-decoration: underline; font: inherit;
+    font-size: 0.72rem;
+  }
+  .link-btn.danger { color: #b54040; }
+  .points-list, .cats-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .point-row, .cat-row {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--rule); border-radius: 3px;
+    cursor: pointer; background: white;
+  }
+  .point-row:hover, .cat-row:hover { background: var(--mist); }
+  .point-row-swatch, .cat-row-swatch {
+    flex-shrink: 0;
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 0.8rem; font-weight: 600;
+  }
+  .point-row-body, .cat-row-body { flex: 1; min-width: 0; }
+  .point-row-label, .cat-row-name {
+    font-size: 0.85rem; font-weight: 500; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .point-row-cat {
+    font-family: 'DM Mono', monospace; font-size: 0.62rem;
+    color: var(--text-secondary); letter-spacing: 0.03em;
+  }
+  .cat-row-hex {
+    font-family: 'DM Mono', monospace; font-size: 0.62rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── MODAL ── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2000;
+  }
+  .modal {
+    background: white; border-radius: 5px; width: 440px;
+    max-width: 90vw; max-height: 90vh;
+    display: flex; flex-direction: column;
+    font-family: 'Instrument Sans', sans-serif;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  }
+  .modal-narrow { width: 360px; }
+  .modal-header {
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .modal-body { padding: 1.1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+  .modal-body label {
+    display: flex; flex-direction: column; gap: 0.3rem;
+    font-family: 'DM Mono', monospace; font-size: 0.65rem;
+    letter-spacing: 0.04em; color: var(--text-secondary);
+  }
+  .modal-body input[type=text],
+  .modal-body input[type=color],
+  .modal-body select,
+  .modal-body textarea {
+    border: 1px solid var(--rule); border-radius: 3px;
+    padding: 0.45rem 0.55rem; font-family: 'Instrument Sans', sans-serif;
+    font-size: 0.85rem; width: 100%; box-sizing: border-box; color: var(--ink);
+  }
+  .modal-body input[type=color] { padding: 0.15rem; height: 2rem; }
+  .modal-body textarea { resize: vertical; font-family: inherit; }
+  .modal-footer {
+    padding: 0.7rem 1.1rem; border-top: 1px solid var(--rule);
+    display: flex; gap: 0.8rem; justify-content: flex-end; align-items: center;
+  }
+  .modal-footer .danger { margin-right: auto; }
+  .primary-btn {
+    background: var(--ink); color: var(--white); border: none;
+    padding: 0.45rem 1.1rem; border-radius: 3px;
+    font-family: 'DM Mono', monospace; font-size: 0.7rem;
+    cursor: pointer; letter-spacing: 0.04em;
+  }
+  .primary-btn:hover { background: #000; }
+
+  /* Manual point marker label */
+  .leaflet-tooltip.point-label {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    color: var(--ink);
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.4rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    white-space: nowrap;
+  }
+  .leaflet-tooltip.point-label::before { display: none; }
 
   table {
     width: 100%;
@@ -749,10 +924,11 @@
   </div>
   <div class="view-toggle">
     <button class="active" onclick="setView('map')" id="btnMap">Map</button>
-    <button onclick="setView('grid')" id="btnGrid">Grid</button>
+    <button onclick="setView('grid')" id="btnGrid">Calendar</button>
     <button onclick="setView('table')" id="btnTable">List</button>
   </div>
   <button id="routesToggle" onclick="toggleRoutes()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">↝ Routes</button>
+  <button id="pointsToggle" onclick="togglePointsPanel()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">◉ Points</button>
   <div class="filter-label">Staff:</div>
   <div class="staff-filter" id="staffFilter"></div>
 </div>
@@ -803,6 +979,90 @@
     <div class="grid-view" id="gridView">
       <div class="grid-scroll" id="gridScroll"></div>
     </div>
+
+    <!-- Manual Points side panel -->
+    <aside class="points-panel" id="pointsPanel">
+      <div class="points-panel-header">
+        <span>Map Points</span>
+        <button class="points-close" onclick="togglePointsPanel()" title="Close">×</button>
+      </div>
+      <div class="points-tabs">
+        <button class="points-tab active" data-tab="points" onclick="switchPointsTab('points')">Points</button>
+        <button class="points-tab" data-tab="cats" onclick="switchPointsTab('cats')">Categories</button>
+      </div>
+
+      <!-- Points tab -->
+      <div class="points-tab-body" id="pointsTabPoints">
+        <button class="add-btn" onclick="startAddPoint()" id="addPointBtn">+ Add point</button>
+        <div id="addModeHint" class="add-mode-hint" style="display:none">
+          Click on the map to choose a location, or
+          <button class="link-btn" onclick="openAddByAddress()">enter an address</button>.
+          <button class="link-btn" onclick="cancelAddPoint()">Cancel</button>
+        </div>
+        <div class="points-list" id="pointsList"></div>
+      </div>
+
+      <!-- Categories tab -->
+      <div class="points-tab-body" id="pointsTabCats" style="display:none">
+        <button class="add-btn" onclick="addCategory()">+ Add category</button>
+        <div class="cats-list" id="catsList"></div>
+      </div>
+    </aside>
+
+    <!-- Add/Edit Point dialog -->
+    <div class="modal-backdrop" id="pointModal" style="display:none">
+      <div class="modal">
+        <div class="modal-header"><span id="pointModalTitle">Add point</span><button class="modal-close" onclick="closePointModal()">×</button></div>
+        <div class="modal-body">
+          <label>Label
+            <input type="text" id="pmLabel" placeholder="e.g. Bristol depot">
+          </label>
+          <label>Category
+            <select id="pmCategory"></select>
+          </label>
+          <label>Address (optional)
+            <input type="text" id="pmAddress" placeholder="Street, town, postcode">
+          </label>
+          <label>Coordinates
+            <div style="display:flex;gap:0.4rem;">
+              <input type="text" id="pmLat" placeholder="Latitude" style="flex:1">
+              <input type="text" id="pmLng" placeholder="Longitude" style="flex:1">
+            </div>
+          </label>
+          <label>Notes (optional)
+            <textarea id="pmNotes" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="link-btn danger" onclick="deletePoint()" id="pmDeleteBtn" style="display:none">Delete</button>
+          <button class="link-btn" onclick="closePointModal()">Cancel</button>
+          <button class="primary-btn" onclick="savePoint()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add/Edit Category dialog -->
+    <div class="modal-backdrop" id="catModal" style="display:none">
+      <div class="modal modal-narrow">
+        <div class="modal-header"><span id="catModalTitle">Add category</span><button class="modal-close" onclick="closeCatModal()">×</button></div>
+        <div class="modal-body">
+          <label>Name
+            <input type="text" id="cmName" placeholder="e.g. Equipment store">
+          </label>
+          <label>Colour
+            <input type="color" id="cmColor" value="#7f8c8d">
+          </label>
+          <label>Icon (single character / emoji)
+            <input type="text" id="cmIcon" maxlength="3" placeholder="•">
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="link-btn danger" onclick="deleteCategory()" id="cmDeleteBtn" style="display:none">Delete</button>
+          <button class="link-btn" onclick="closeCatModal()">Cancel</button>
+          <button class="primary-btn" onclick="saveCategory()">Save</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -817,9 +1077,11 @@ const CONFIG = {
   redirectUri: 'https://charlie-fayers.github.io/Staff-Calendar/',
 
   // Microsoft Graph site & list identifiers
-  siteId:           'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
-  staffListName:    'Staff',
-  calendarListName: 'StaffCalendarCache',
+  siteId:                'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
+  staffListName:         'Staff',
+  calendarListName:      'StaffCalendarCache',
+  pointsListName:        'ManualPoints',
+  categoriesListName:    'ManualPointCategories',
 
   // Won Projects workbook — read directly via Graph
   workbookSitePath: 'clarksonwoods.sharepoint.com:/sites/Data:',
@@ -849,7 +1111,7 @@ const msalConfig = {
   },
 };
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-const graphScopes = ['Sites.Read.All', 'Files.Read.All', 'User.Read'];
+const graphScopes = ['Sites.ReadWrite.All', 'Files.Read.All', 'User.Read'];
 
 async function getGraphToken() {
   const accounts = msalInstance.getAllAccounts();
@@ -984,6 +1246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadStaff();
   await loadData();
+  loadPointsAndCategories();   // load in background; renders to map when ready
 });
 
 function initMap() {
@@ -1001,6 +1264,7 @@ function initMap() {
   }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
+  attachMapClickForAdd();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1346,6 +1610,11 @@ function extractProjectNo(str) {
 // ═══════════════════════════════════════════════════════════
 // RENDERING
 // ═══════════════════════════════════════════════════════════
+let surveyEvents = [];   // map/sidebar/table see these only
+function isSurveyType(t) {
+  return t === 'Field survey' || t === 'Field survey (out of hours)' || t === 'Survey';
+}
+
 function renderAll() {
   const ws = currentWeekStart;
   const we = getWeekEnd(ws);
@@ -1354,6 +1623,7 @@ function renderAll() {
     const d = new Date(e.date);
     return d >= ws && d <= we && activeStaff.has(e.person) && validStaff.has(e.person);
   });
+  surveyEvents = filteredEvents.filter(e => isSurveyType(e.type));
   updateStats();
   renderSidebar();
   renderMap();
@@ -1362,24 +1632,24 @@ function renderAll() {
 }
 
 function updateStats() {
-  const siteVisits = filteredEvents.filter(e => e.type === 'Survey').length;
-  const staff = new Set(filteredEvents.map(e => e.person)).size;
-  const counties = new Set(filteredEvents.filter(e=>e.county).map(e => e.county)).size;
-  const projects = new Set(filteredEvents.filter(e=>e.projectNo).map(e => e.projectNo)).size;
+  const siteVisits = surveyEvents.length;
+  const staff = new Set(surveyEvents.map(e => e.person)).size;
+  const counties = new Set(surveyEvents.filter(e=>e.county).map(e => e.county)).size;
+  const projects = new Set(surveyEvents.filter(e=>e.projectNo).map(e => e.projectNo)).size;
   document.getElementById('statEvents').textContent = siteVisits;
   document.getElementById('statStaff').textContent = staff;
   document.getElementById('statCounties').textContent = counties;
   document.getElementById('statProjects').textContent = projects;
-  document.getElementById('eventCount').textContent = filteredEvents.length + ' event' + (filteredEvents.length!==1?'s':'');
+  document.getElementById('eventCount').textContent = surveyEvents.length + ' visit' + (surveyEvents.length!==1?'s':'');
 }
 
 function renderSidebar() {
   const container = document.getElementById('sidebarScroll');
-  if (!filteredEvents.length) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><p>No events this week</p></div>';
+  if (!surveyEvents.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><p>No site visits this week</p></div>';
     return;
   }
-  const grouped = groupByDate(filteredEvents);
+  const grouped = groupByDate(surveyEvents);
   const today = new Date().toISOString().split('T')[0];
   let html = '';
   grouped.forEach((events, date) => {
@@ -1425,9 +1695,9 @@ function renderSidebar() {
 function renderMap() {
   markerLayer.clearLayers();
   routeLayer.clearLayers();
-  // Group events by location (same lat/lng)
+  // Group survey events by location (same lat/lng)
   const locations = {};
-  filteredEvents.forEach(e => {
+  surveyEvents.forEach(e => {
     if (!e.lat || !e.lng) return;
     const key = `${e.lat.toFixed(4)},${e.lng.toFixed(4)}`;
     if (!locations[key]) locations[key] = { lat: e.lat, lng: e.lng, events: [] };
@@ -1504,9 +1774,9 @@ const OFFICE = { lat: 51.22585379648861, lng: -2.8520737323545187, name: 'Office
 const _routeCache = {};
 
 async function renderRoutes() {
-  // Group events by (person, date), only those with coords
+  // Group survey events by (person, date), only those with coords
   const groups = {};
-  filteredEvents.forEach(e => {
+  surveyEvents.forEach(e => {
     if (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng)) return;
     const k = `${e.person}|${e.date}`;
     if (!groups[k]) groups[k] = { person: e.person, date: e.date, stops: [] };
@@ -1576,6 +1846,388 @@ function toggleRoutes() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// MANUAL POINTS
+// ═══════════════════════════════════════════════════════════
+let manualPoints = [];        // [{id, label, category, lat, lng, address, notes}]
+let categories = [];          // [{id, name, color, icon}]
+let pointsLayer = null;
+let pointsPanelOpen = false;
+let addPointMode = false;
+let editingPointId = null;
+let editingCatId = null;
+let pendingCoords = null;     // when user clicks on map
+
+async function loadPointsAndCategories() {
+  if (!CONFIG.useLiveData) return;
+  try {
+    const [catListId, ptListId] = await Promise.all([
+      getListId(CONFIG.categoriesListName),
+      getListId(CONFIG.pointsListName),
+    ]);
+    const [catData, ptData] = await Promise.all([
+      graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${catListId}/items?$expand=fields&$top=200`),
+      graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${ptListId}/items?$expand=fields&$top=999`),
+    ]);
+    categories = (catData?.value || []).map(it => ({
+      id:    it.id,
+      name:  it.fields?.Title || '',
+      color: it.fields?.Color || '#7f8c8d',
+      icon:  it.fields?.Icon || '•',
+    })).filter(c => c.name);
+    manualPoints = (ptData?.value || []).map(it => {
+      const f = it.fields || {};
+      return {
+        id:       it.id,
+        label:    f.Title || '',
+        category: f.Category || '',
+        lat:      parseFloat(f.Latitude),
+        lng:      parseFloat(f.Longitude),
+        address:  f.Address || '',
+        notes:    f.Notes || '',
+      };
+    }).filter(p => !isNaN(p.lat) && !isNaN(p.lng));
+    renderPointsList();
+    renderCategoriesList();
+    renderPointsLayer();
+  } catch(e) {
+    console.error('Points/categories load failed', e);
+    showNotification('Could not load manual points', 'error');
+  }
+}
+
+function categoryByName(name) {
+  return categories.find(c => c.name === name) || { name, color: '#7f8c8d', icon: '•' };
+}
+
+function renderPointsLayer() {
+  if (!pointsLayer) pointsLayer = L.layerGroup().addTo(map);
+  pointsLayer.clearLayers();
+  manualPoints.forEach(p => {
+    const cat = categoryByName(p.category);
+    const size = 26;
+    const html = `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${cat.color};
+      color:white;font-size:0.85rem;font-weight:600;display:flex;align-items:center;
+      justify-content:center;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);">${cat.icon}</div>`;
+    const icon = L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
+    const popupHtml = `
+      <div style="font-family:'Instrument Sans',sans-serif">
+        <div style="font-weight:600;margin-bottom:0.3rem">${escapeHtml(p.label)}</div>
+        <div style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#666;margin-bottom:0.4rem">${escapeHtml(p.category)}</div>
+        ${p.address ? `<div style="font-size:0.78rem;margin-bottom:0.3rem">${escapeHtml(p.address)}</div>` : ''}
+        ${p.notes ? `<div style="font-size:0.78rem;color:#444;border-top:1px solid #eee;padding-top:0.3rem;margin-top:0.3rem">${escapeHtml(p.notes)}</div>` : ''}
+        <div style="margin-top:0.5rem"><button class="link-btn" onclick="openEditPoint('${p.id}')">Edit</button></div>
+      </div>`;
+    const marker = L.marker([p.lat, p.lng], { icon })
+      .bindPopup(popupHtml, { maxWidth: 260 })
+      .bindTooltip(p.label, {
+        permanent: true, direction: 'right',
+        offset: [size/2 + 2, 0], className: 'point-label',
+      });
+    pointsLayer.addLayer(marker);
+  });
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function togglePointsPanel() {
+  pointsPanelOpen = !pointsPanelOpen;
+  document.getElementById('pointsPanel').classList.toggle('visible', pointsPanelOpen);
+  document.getElementById('pointsToggle').classList.toggle('active', pointsPanelOpen);
+  if (pointsPanelOpen && !manualPoints.length && !categories.length) {
+    loadPointsAndCategories();
+  }
+}
+
+function switchPointsTab(tab) {
+  document.querySelectorAll('.points-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('pointsTabPoints').style.display = tab === 'points' ? '' : 'none';
+  document.getElementById('pointsTabCats').style.display   = tab === 'cats'   ? '' : 'none';
+}
+
+function renderPointsList() {
+  const c = document.getElementById('pointsList');
+  if (!manualPoints.length) {
+    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No points yet. Click "Add point" to create one.</div>';
+    return;
+  }
+  c.innerHTML = manualPoints.map(p => {
+    const cat = categoryByName(p.category);
+    return `<div class="point-row" onclick="focusPoint('${p.id}')">
+      <div class="point-row-swatch" style="background:${cat.color}">${cat.icon}</div>
+      <div class="point-row-body">
+        <div class="point-row-label">${escapeHtml(p.label)}</div>
+        <div class="point-row-cat">${escapeHtml(p.category)}</div>
+      </div>
+      <button class="link-btn" onclick="event.stopPropagation();openEditPoint('${p.id}')">Edit</button>
+    </div>`;
+  }).join('');
+}
+
+function renderCategoriesList() {
+  const c = document.getElementById('catsList');
+  if (!categories.length) {
+    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No categories yet.</div>';
+    return;
+  }
+  c.innerHTML = categories.map(cat => `
+    <div class="cat-row" onclick="openEditCategory('${cat.id}')">
+      <div class="cat-row-swatch" style="background:${cat.color}">${cat.icon}</div>
+      <div class="cat-row-body">
+        <div class="cat-row-name">${escapeHtml(cat.name)}</div>
+        <div class="cat-row-hex">${cat.color}</div>
+      </div>
+    </div>`).join('');
+}
+
+function focusPoint(id) {
+  const p = manualPoints.find(x => x.id === id);
+  if (!p) return;
+  map.setView([p.lat, p.lng], 14);
+}
+
+// ── Add point flow ─────────────────────────────────────────
+function startAddPoint() {
+  addPointMode = true;
+  document.getElementById('addModeHint').style.display = '';
+  document.getElementById('addPointBtn').style.display = 'none';
+  map.getContainer().style.cursor = 'crosshair';
+}
+function cancelAddPoint() {
+  addPointMode = false;
+  document.getElementById('addModeHint').style.display = 'none';
+  document.getElementById('addPointBtn').style.display = '';
+  map.getContainer().style.cursor = '';
+}
+function openAddByAddress() {
+  cancelAddPoint();
+  openPointModal(null, { label:'', category: categories[0]?.name || '', lat: '', lng: '', address: '', notes: '' });
+  document.getElementById('pmAddress').focus();
+}
+
+// Map click handler — set up once map exists
+function attachMapClickForAdd() {
+  if (!map) return;
+  map.on('click', e => {
+    if (!addPointMode) return;
+    cancelAddPoint();
+    openPointModal(null, {
+      label: '', category: categories[0]?.name || '',
+      lat: e.latlng.lat.toFixed(6), lng: e.latlng.lng.toFixed(6),
+      address: '', notes: ''
+    });
+  });
+}
+
+// ── Point modal ────────────────────────────────────────────
+function openPointModal(id, vals) {
+  editingPointId = id;
+  document.getElementById('pointModalTitle').textContent = id ? 'Edit point' : 'Add point';
+  document.getElementById('pmDeleteBtn').style.display = id ? '' : 'none';
+  // Populate category dropdown
+  const sel = document.getElementById('pmCategory');
+  sel.innerHTML = categories.map(c =>
+    `<option value="${escapeHtml(c.name)}" ${c.name === vals.category ? 'selected' : ''}>${c.icon} ${escapeHtml(c.name)}</option>`).join('');
+  document.getElementById('pmLabel').value   = vals.label   || '';
+  document.getElementById('pmAddress').value = vals.address || '';
+  document.getElementById('pmLat').value     = vals.lat     || '';
+  document.getElementById('pmLng').value     = vals.lng     || '';
+  document.getElementById('pmNotes').value   = vals.notes   || '';
+  document.getElementById('pointModal').style.display = '';
+}
+function closePointModal() {
+  document.getElementById('pointModal').style.display = 'none';
+  editingPointId = null;
+}
+function openEditPoint(id) {
+  const p = manualPoints.find(x => x.id === id);
+  if (!p) return;
+  openPointModal(id, p);
+}
+
+async function savePoint() {
+  let lat = parseFloat(document.getElementById('pmLat').value);
+  let lng = parseFloat(document.getElementById('pmLng').value);
+  const label   = document.getElementById('pmLabel').value.trim();
+  const category= document.getElementById('pmCategory').value;
+  const address = document.getElementById('pmAddress').value.trim();
+  const notes   = document.getElementById('pmNotes').value.trim();
+  if (!label) { alert('Please enter a label.'); return; }
+
+  // If no coords but address given, try to geocode it
+  if ((isNaN(lat) || isNaN(lng)) && address) {
+    const geo = await geocodeAddress(address);
+    if (geo) { lat = geo.lat; lng = geo.lng; }
+  }
+  if (isNaN(lat) || isNaN(lng)) {
+    alert('Please provide either coordinates or a valid address (UK).');
+    return;
+  }
+
+  const fields = {
+    Title:     label,
+    Category:  category,
+    Latitude:  String(lat),
+    Longitude: String(lng),
+    Address:   address,
+    Notes:     notes,
+  };
+  try {
+    const listId = await getListId(CONFIG.pointsListName);
+    if (editingPointId) {
+      await graphMutate('PATCH',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingPointId}/fields`,
+        fields);
+    } else {
+      await graphMutate('POST',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
+        { fields });
+    }
+    closePointModal();
+    await loadPointsAndCategories();
+    showNotification(editingPointId ? 'Point updated' : 'Point added', 'ok');
+  } catch(e) {
+    console.error(e);
+    showNotification('Failed to save point', 'error');
+  }
+}
+
+async function deletePoint() {
+  if (!editingPointId) return;
+  if (!confirm('Delete this point?')) return;
+  try {
+    const listId = await getListId(CONFIG.pointsListName);
+    await graphMutate('DELETE',
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingPointId}`);
+    closePointModal();
+    await loadPointsAndCategories();
+    showNotification('Point deleted', 'ok');
+  } catch(e) {
+    console.error(e);
+    showNotification('Failed to delete point', 'error');
+  }
+}
+
+// ── Category modal ─────────────────────────────────────────
+function addCategory() {
+  editingCatId = null;
+  document.getElementById('catModalTitle').textContent = 'Add category';
+  document.getElementById('cmDeleteBtn').style.display = 'none';
+  document.getElementById('cmName').value = '';
+  document.getElementById('cmColor').value = '#7f8c8d';
+  document.getElementById('cmIcon').value = '•';
+  document.getElementById('catModal').style.display = '';
+}
+function openEditCategory(id) {
+  const c = categories.find(x => x.id === id);
+  if (!c) return;
+  editingCatId = id;
+  document.getElementById('catModalTitle').textContent = 'Edit category';
+  document.getElementById('cmDeleteBtn').style.display = '';
+  document.getElementById('cmName').value = c.name;
+  document.getElementById('cmColor').value = c.color;
+  document.getElementById('cmIcon').value = c.icon;
+  document.getElementById('catModal').style.display = '';
+}
+function closeCatModal() {
+  document.getElementById('catModal').style.display = 'none';
+  editingCatId = null;
+}
+async function saveCategory() {
+  const name  = document.getElementById('cmName').value.trim();
+  const color = document.getElementById('cmColor').value;
+  const icon  = document.getElementById('cmIcon').value.trim() || '•';
+  if (!name) { alert('Please enter a name.'); return; }
+  const fields = { Title: name, Color: color, Icon: icon };
+  try {
+    const listId = await getListId(CONFIG.categoriesListName);
+    if (editingCatId) {
+      await graphMutate('PATCH',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingCatId}/fields`,
+        fields);
+    } else {
+      await graphMutate('POST',
+        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
+        { fields });
+    }
+    closeCatModal();
+    await loadPointsAndCategories();
+    showNotification(editingCatId ? 'Category updated' : 'Category added', 'ok');
+  } catch(e) {
+    console.error(e);
+    showNotification('Failed to save category', 'error');
+  }
+}
+async function deleteCategory() {
+  if (!editingCatId) return;
+  const c = categories.find(x => x.id === editingCatId);
+  const usedBy = manualPoints.filter(p => p.category === c?.name).length;
+  let msg = 'Delete this category?';
+  if (usedBy > 0) msg += `\n\n${usedBy} point(s) currently use it. Those points will keep the category text but lose its colour/icon.`;
+  if (!confirm(msg)) return;
+  try {
+    const listId = await getListId(CONFIG.categoriesListName);
+    await graphMutate('DELETE',
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingCatId}`);
+    closeCatModal();
+    await loadPointsAndCategories();
+    showNotification('Category deleted', 'ok');
+  } catch(e) {
+    console.error(e);
+    showNotification('Failed to delete category', 'error');
+  }
+}
+
+// ── Address geocoding (UK postcodes preferred, falls back to Nominatim) ──
+async function geocodeAddress(addr) {
+  // Try postcode first
+  const pcMatch = addr.match(/[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i);
+  if (pcMatch) {
+    const clean = pcMatch[0].replace(/\s+/g, '').toUpperCase();
+    try {
+      const r = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j.status === 200 && j.result) return { lat: j.result.latitude, lng: j.result.longitude };
+      }
+    } catch {}
+  }
+  // Fall back to Nominatim (free-text)
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr + ', UK')}&format=json&limit=1`);
+    if (r.ok) {
+      const j = await r.json();
+      if (j.length) return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+    }
+  } catch {}
+  return null;
+}
+
+// ── Graph mutation helper ──────────────────────────────────
+async function graphMutate(method, path, body) {
+  const token = await getGraphToken();
+  if (!token) throw new Error('No token');
+  const opts = {
+    method,
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+    },
+  };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, opts);
+  if (!res.ok && res.status !== 204) {
+    const txt = await res.text();
+    throw new Error(`Graph ${res.status}: ${txt}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
 function formatDateRange(dates) {
   if (!dates.length) return '';
   const fmt = d => {
@@ -1630,7 +2282,7 @@ function buildPopup(loc, persons) {
 
 function renderTable() {
   const tbody = document.getElementById('tableBody');
-  tbody.innerHTML = filteredEvents.map(e => {
+  tbody.innerHTML = surveyEvents.map(e => {
     const color = staffColor(e.person);
     return `<tr onclick="focusEvent(${e.id})">
       <td><div class="td-person"><div class="person-dot" style="background:${color}"></div>${e.person}</div></td>
@@ -1670,6 +2322,17 @@ function setView(view) {
   if (view === 'grid') renderGrid();
 }
 
+// Calendar (grid) view event colors by type
+const TYPE_COLORS = {
+  'Field survey':                '#4a8d3e',   // green
+  'Field survey (out of hours)': '#2c6622',   // darker green
+  'Survey':                      '#4a8d3e',   // legacy
+  'Office':                      '#2a6db5',   // blue
+  'WFH':                         '#e8b800',   // yellow
+  'Leave':                       '#e67e22',   // orange
+};
+function typeColor(t) { return TYPE_COLORS[t] || '#888'; }
+
 function renderGrid() {
   const container = document.getElementById('gridScroll');
   const ws = currentWeekStart;
@@ -1679,10 +2342,10 @@ function renderGrid() {
     d.setDate(d.getDate() + i);
     days.push(d);
   }
-  const todayISO = new Date().toISOString().split('T')[0];
+  const todayISO = fmtDateLocal(new Date());
   const validStaff = staffList.filter(s => activeStaff.has(s.name));
 
-  // Index events by person+date
+  // Index events by person+date — use filteredEvents (all types) for calendar
   const eventsBy = {};
   filteredEvents.forEach(e => {
     const k = e.person + '|' + e.date;
@@ -1697,9 +2360,15 @@ function renderGrid() {
     return `${dow}<br>${day} ${mon}`;
   };
 
-  let html = '<table class="week-grid"><thead><tr><th>Staff</th>';
+  let html = '<div class="grid-legend">';
+  ['Field survey','Office','WFH','Leave'].forEach(t => {
+    html += `<span class="grid-legend-item"><span class="grid-legend-swatch" style="background:${typeColor(t)}"></span>${t}</span>`;
+  });
+  html += '</div>';
+
+  html += '<table class="week-grid"><thead><tr><th>Staff</th>';
   days.forEach(d => {
-    const dISO = d.toISOString().split('T')[0];
+    const dISO = fmtDateLocal(d);
     const isToday = dISO === todayISO;
     html += `<th class="${isToday?'today':''}">${fmtDay(d)}</th>`;
   });
@@ -1711,14 +2380,25 @@ function renderGrid() {
       const dISO = fmtDateLocal(d);
       const isToday = dISO === todayISO;
       const evs = eventsBy[s.name + '|' + dISO] || [];
+      // Sort: surveys first (by start time), then full-day events
+      evs.sort((a, b) => {
+        const aSurvey = isSurveyType(a.type) ? 0 : 1;
+        const bSurvey = isSurveyType(b.type) ? 0 : 1;
+        if (aSurvey !== bSurvey) return aSurvey - bSurvey;
+        return (a.startISO || '').localeCompare(b.startISO || '');
+      });
       html += `<td class="${isToday?'today':''}">`;
       evs.forEach(e => {
+        const color = typeColor(e.type);
         const loc = e.town || e.county || '';
-        html += `<div class="grid-event" style="background:${s.color}" onclick="focusEvent('${e.id}')">
-          ${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
-          ${e.title ? `<div>${e.title.replace(/^(SURVEY|MEETING)\s*–\s*/i,'').substring(0, 40)}</div>` : ''}
-          ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}
-        </div>`;
+        const title = (e.title || '').replace(/^(SURVEY|MEETING)\s*–\s*/i,'');
+        const isSurvey = isSurveyType(e.type);
+        const body = isSurvey
+          ? `${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
+             ${title ? `<div>${title.substring(0, 40)}</div>` : ''}
+             ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}`
+          : `<div style="font-weight:600">${e.type}</div>`;
+        html += `<div class="grid-event" style="background:${color}" onclick="focusEvent('${e.id}')">${body}</div>`;
       });
       html += '</td>';
     });
