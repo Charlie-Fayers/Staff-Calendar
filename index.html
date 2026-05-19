@@ -821,6 +821,17 @@ const CONFIG = {
   staffListName:    'Staff',
   calendarListName: 'StaffCalendarCache',
 
+  // Won Projects workbook — read directly via Graph
+  workbookSitePath: 'clarksonwoods.sharepoint.com:/sites/Data:',
+  workbookName:     'Won projects details.xlsx',
+  workbookSheet:    'Won quotes',
+  // Column letters in the workbook (A = 0, B = 1, …)
+  colProject:       0,  // A — project number
+  colSite:          3,  // D
+  colTown:          4,  // E
+  colCounty:        5,  // F
+  colPostcode:      6,  // G — new column
+
   // Set to true when running against the real Graph API
   useLiveData: true,
 };
@@ -838,7 +849,7 @@ const msalConfig = {
   },
 };
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-const graphScopes = ['Sites.Read.All', 'User.Read'];
+const graphScopes = ['Sites.Read.All', 'Files.Read.All', 'User.Read'];
 
 async function getGraphToken() {
   const accounts = msalInstance.getAllAccounts();
@@ -1167,6 +1178,110 @@ async function refreshData() {
   document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 }
 
+// ── Won Projects workbook (read once per session) ─────────
+let projectLookup = null;   // { '1234': { site, town, county, postcode, lat, lng } }
+let _workbookLoading = null;
+
+async function ensureProjectLookup() {
+  if (projectLookup) return projectLookup;
+  if (_workbookLoading) return _workbookLoading;
+  _workbookLoading = (async () => {
+    try {
+      // Resolve workbook site + drive
+      const site = await graphFetch(`/sites/${encodeURIComponent(CONFIG.workbookSitePath)}`);
+      if (!site) return {};
+      const drive = await graphFetch(`/sites/${site.id}/drive`);
+      const driveId = drive.id;
+      // Find the workbook
+      const search = await graphFetch(`/drives/${driveId}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
+      const file = (search.value || []).find(f => f.name === CONFIG.workbookName);
+      if (!file) {
+        showNotification('Won Projects workbook not found', 'error');
+        return {};
+      }
+      // Used range from the named sheet
+      const sheet = encodeURIComponent(CONFIG.workbookSheet);
+      const range = await graphFetch(`/drives/${driveId}/items/${file.id}/workbook/worksheets('${sheet}')/usedRange(valuesOnly=true)`);
+      const rows = range.values || [];
+      const lookup = {};
+      const postcodes = new Set();
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r) continue;
+        let num = ('' + (r[CONFIG.colProject] || '')).trim();
+        if (/^\d+\.0$/.test(num)) num = num.slice(0, -2);
+        if (!num) continue;
+        const postcode = ('' + (r[CONFIG.colPostcode] || '')).trim();
+        lookup[num] = {
+          site:     ('' + (r[CONFIG.colSite]   || '')).trim(),
+          town:     ('' + (r[CONFIG.colTown]   || '')).trim(),
+          county:   ('' + (r[CONFIG.colCounty] || '')).trim(),
+          postcode: postcode,
+          lat: null, lng: null,
+        };
+        if (isValidPostcode(postcode)) postcodes.add(postcode);
+      }
+      // Bulk-resolve all postcodes
+      const pcCoords = await resolvePostcodesBulk([...postcodes]);
+      for (const num in lookup) {
+        const pc = lookup[num].postcode;
+        if (!pc) continue;
+        const key = pc.replace(/\s+/g, '').toUpperCase();
+        if (pcCoords[key]) {
+          lookup[num].lat = pcCoords[key].lat;
+          lookup[num].lng = pcCoords[key].lng;
+        }
+      }
+      projectLookup = lookup;
+      console.log(`Loaded ${Object.keys(lookup).length} projects, ${Object.values(lookup).filter(p => p.lat).length} geocoded`);
+      return lookup;
+    } catch(e) {
+      console.error('Workbook load failed', e);
+      showNotification('Could not load Won Projects workbook', 'error');
+      projectLookup = {};
+      return {};
+    }
+  })();
+  return _workbookLoading;
+}
+
+function isValidPostcode(pc) {
+  if (!pc) return false;
+  const clean = pc.replace(/\s+/g, '').toUpperCase();
+  return /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/.test(clean);
+}
+
+async function resolvePostcodesBulk(postcodes) {
+  const out = {};
+  if (!postcodes.length) return out;
+  for (let i = 0; i < postcodes.length; i += 100) {
+    const batch = postcodes.slice(i, i + 100);
+    try {
+      const res = await fetch('https://api.postcodes.io/postcodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postcodes: batch }),
+      });
+      if (!res.ok) throw new Error('postcodes.io ' + res.status);
+      const data = await res.json();
+      if (data.status === 200 && data.result) {
+        data.result.forEach(item => {
+          if (item.result) {
+            const key = (item.query || '').replace(/\s+/g, '').toUpperCase();
+            out[key] = {
+              lat: item.result.latitude,
+              lng: item.result.longitude,
+            };
+          }
+        });
+      }
+    } catch(e) {
+      console.warn('Postcode batch failed', e);
+    }
+  }
+  return out;
+}
+
 // ── Microsoft Graph fetch (production) ─────────────────────
 function fmtDateLocal(d) {
   const y = d.getFullYear();
@@ -1180,23 +1295,34 @@ async function fetchSharePointData() {
   const listId = await getListId(CONFIG.calendarListName);
   const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
   const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
-  const data = await graphFetch(path);
-  if (!data) return [];   // login redirect in progress
+  const [data, lookup] = await Promise.all([
+    graphFetch(path),
+    ensureProjectLookup(),
+  ]);
+  if (!data) return [];
   return data.value.map(item => {
     const f = item.fields || {};
+    const proj = (f.ProjectNumber || extractProjectNo(f.Title) || '').toString();
+    const enriched = (proj && lookup[proj]) ? lookup[proj] : null;
     return {
       id:        item.id,
       person:    f.StaffName,
       date:      f.EventDate ? f.EventDate.split('T')[0] : '',
       startISO:  f.EventDate || '',
       endISO:    f.EventEnd || '',
-      projectNo: f.ProjectNumber || extractProjectNo(f.Title),
+      projectNo: proj,
       title:     f.Title,
-      town:      f.Town,
-      county:    f.County,
-      lat:       parseFloat(f.Latitude),
-      lng:       parseFloat(f.Longitude),
+      site:      enriched ? enriched.site   : '',
+      town:      enriched ? enriched.town   : '',
+      county:    enriched ? enriched.county : '',
+      postcode:  enriched ? enriched.postcode : '',
+      lat:       enriched && enriched.lat != null ? Number(enriched.lat) : NaN,
+      lng:       enriched && enriched.lng != null ? Number(enriched.lng) : NaN,
       type:      f.EventType || 'Survey',
+      // For "Not on map" reasoning:
+      _projInLookup:    !!enriched,
+      _hasPostcode:     !!(enriched && enriched.postcode),
+      _hasValidPostcode: !!(enriched && isValidPostcode(enriched.postcode)),
     };
   });
 }
@@ -1261,10 +1387,14 @@ function renderSidebar() {
         let reason = 'No coordinates';
         if (!e.projectNo) {
           reason = 'No 4-digit site code in calendar entry';
-        } else if (!e.town && !e.county) {
+        } else if (!e._projInLookup) {
           reason = `Project ${e.projectNo} not found in Won Projects`;
+        } else if (!e._hasPostcode) {
+          reason = `Project ${e.projectNo} has no Nearest postcode in workbook`;
+        } else if (!e._hasValidPostcode) {
+          reason = `Project ${e.projectNo} postcode '${e.postcode}' not valid`;
         } else {
-          reason = `Project ${e.projectNo} has no coordinates in Won Projects`;
+          reason = `Project ${e.projectNo} postcode '${e.postcode}' could not be geocoded`;
         }
         warnTag = `<span class="warn-tag" title="${reason}">⚠ ${reason}</span>`;
       }
