@@ -578,6 +578,13 @@
     font-family: 'DM Mono', monospace; font-size: 0.62rem;
     color: var(--text-secondary);
   }
+  .cat-row.off .cat-row-name { color: var(--text-secondary); }
+  .cat-eye {
+    background: none; border: none; cursor: pointer;
+    font-size: 1rem; padding: 0.2rem 0.4rem; border-radius: 3px;
+    color: var(--text-secondary);
+  }
+  .cat-eye:hover { background: var(--mist); color: var(--ink); }
 
   /* ── MODAL ── */
   .modal-backdrop {
@@ -1258,10 +1265,31 @@ function initMap() {
     maxBoundsViscosity: 1.0,
     minZoom: 5,
   }).fitBounds(ukBounds);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
-    maxZoom: 19
-  }).addTo(map);
+
+  // Basemap options
+  const basemaps = {
+    'Light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap © CARTO', maxZoom: 19, subdomains: 'abcd'
+    }),
+    'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors', maxZoom: 19
+    }),
+    'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri',
+      maxZoom: 19
+    }),
+    'Satellite + labels': L.layerGroup([
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri', maxZoom: 19
+      }),
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+        attribution: '© CARTO labels', maxZoom: 19, subdomains: 'abcd', opacity: 0.9
+      })
+    ]),
+  };
+  basemaps['Light'].addTo(map);
+  L.control.layers(basemaps, null, { position: 'topright', collapsed: true }).addTo(map);
+
   markerLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
   attachMapClickForAdd();
@@ -1424,7 +1452,11 @@ async function loadData() {
     }
     buildStaffFilter();   // refresh chips based on who's actually on site this week
     renderAll();
-    showNotification('Calendar data loaded', 'ok');
+    if (projectLookup) {
+      showNotification('Calendar data loaded', 'ok');
+    } else {
+      showNotification('Calendar loaded — locations resolving in background', 'ok');
+    }
   } catch(e) {
     showNotification('Failed to load data: ' + e.message, 'error');
   } finally {
@@ -1569,36 +1601,62 @@ async function fetchSharePointData() {
   const listId = await getListId(CONFIG.calendarListName);
   const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
   const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
-  const [data, lookup] = await Promise.all([
-    graphFetch(path),
-    ensureProjectLookup(),
-  ]);
+  const data = await graphFetch(path);
   if (!data) return [];
-  return data.value.map(item => {
-    const f = item.fields || {};
-    const proj = (f.ProjectNumber || extractProjectNo(f.Title) || '').toString();
-    const enriched = (proj && lookup[proj]) ? lookup[proj] : null;
-    return {
-      id:        item.id,
-      person:    f.StaffName,
-      date:      f.EventDate ? f.EventDate.split('T')[0] : '',
-      startISO:  f.EventDate || '',
-      endISO:    f.EventEnd || '',
-      projectNo: proj,
-      title:     f.Title,
-      site:      enriched ? enriched.site   : '',
-      town:      enriched ? enriched.town   : '',
-      county:    enriched ? enriched.county : '',
-      postcode:  enriched ? enriched.postcode : '',
-      lat:       enriched && enriched.lat != null ? Number(enriched.lat) : NaN,
-      lng:       enriched && enriched.lng != null ? Number(enriched.lng) : NaN,
-      type:      f.EventType || 'Survey',
-      // For "Not on map" reasoning:
-      _projInLookup:    !!enriched,
-      _hasPostcode:     !!(enriched && enriched.postcode),
-      _hasValidPostcode: !!(enriched && isValidPostcode(enriched.postcode)),
-    };
-  });
+  // Use whatever's already in the workbook lookup (may be empty on first run)
+  const lookup = projectLookup || {};
+  const events = data.value.map(item => mapEventItem(item, lookup));
+
+  // If lookup isn't ready yet, kick it off in background and re-render when it lands
+  if (!projectLookup) {
+    ensureProjectLookup().then(newLookup => {
+      // Enrich existing events in place
+      [allEvents, surveyEvents, filteredEvents].forEach(arr => {
+        arr.forEach(e => {
+          if (!e.projectNo || !newLookup[e.projectNo]) return;
+          const en = newLookup[e.projectNo];
+          e.site = en.site; e.town = en.town; e.county = en.county;
+          e.postcode = en.postcode;
+          if (en.lat != null) e.lat = Number(en.lat);
+          if (en.lng != null) e.lng = Number(en.lng);
+          e._projInLookup = true;
+          e._hasPostcode = !!en.postcode;
+          e._hasValidPostcode = isValidPostcode(en.postcode);
+        });
+      });
+      renderSidebar();
+      renderMap();
+      renderTable();
+      if (currentView === 'grid') renderGrid();
+      showNotification('Locations loaded', 'ok');
+    }).catch(e => console.error('Background workbook load failed', e));
+  }
+  return events;
+}
+
+function mapEventItem(item, lookup) {
+  const f = item.fields || {};
+  const proj = (f.ProjectNumber || extractProjectNo(f.Title) || '').toString();
+  const enriched = (proj && lookup[proj]) ? lookup[proj] : null;
+  return {
+    id:        item.id,
+    person:    f.StaffName,
+    date:      f.EventDate ? f.EventDate.split('T')[0] : '',
+    startISO:  f.EventDate || '',
+    endISO:    f.EventEnd || '',
+    projectNo: proj,
+    title:     f.Title,
+    site:      enriched ? enriched.site   : '',
+    town:      enriched ? enriched.town   : '',
+    county:    enriched ? enriched.county : '',
+    postcode:  enriched ? enriched.postcode : '',
+    lat:       enriched && enriched.lat != null ? Number(enriched.lat) : NaN,
+    lng:       enriched && enriched.lng != null ? Number(enriched.lng) : NaN,
+    type:      f.EventType || 'Survey',
+    _projInLookup:    !!enriched,
+    _hasPostcode:     !!(enriched && enriched.postcode),
+    _hasValidPostcode: !!(enriched && isValidPostcode(enriched.postcode)),
+  };
 }
 
 // Extract 4-digit project number from a string
@@ -1851,6 +1909,7 @@ function toggleRoutes() {
 // ═══════════════════════════════════════════════════════════
 let manualPoints = [];        // [{id, label, category, lat, lng, address, notes}]
 let categories = [];          // [{id, name, color, icon}]
+let activeCategories = new Set();   // names of categories currently shown
 let pointsLayer = null;
 let pointsPanelOpen = false;
 let addPointMode = false;
@@ -1875,6 +1934,13 @@ async function loadPointsAndCategories() {
       color: it.fields?.Color || '#7f8c8d',
       icon:  it.fields?.Icon || '•',
     })).filter(c => c.name);
+    // Default: all categories on. Preserve any user toggles from before.
+    const existing = new Set(activeCategories);
+    activeCategories = new Set(
+      categories.map(c => c.name)
+        .filter(n => existing.size === 0 || existing.has(n))
+    );
+    if (existing.size === 0) categories.forEach(c => activeCategories.add(c.name));
     manualPoints = (ptData?.value || []).map(it => {
       const f = it.fields || {};
       return {
@@ -1904,6 +1970,7 @@ function renderPointsLayer() {
   if (!pointsLayer) pointsLayer = L.layerGroup().addTo(map);
   pointsLayer.clearLayers();
   manualPoints.forEach(p => {
+    if (!activeCategories.has(p.category)) return;
     const cat = categoryByName(p.category);
     const size = 26;
     const html = `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${cat.color};
@@ -1972,14 +2039,26 @@ function renderCategoriesList() {
     c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No categories yet.</div>';
     return;
   }
-  c.innerHTML = categories.map(cat => `
-    <div class="cat-row" onclick="openEditCategory('${cat.id}')">
-      <div class="cat-row-swatch" style="background:${cat.color}">${cat.icon}</div>
-      <div class="cat-row-body">
+  c.innerHTML = categories.map(cat => {
+    const on = activeCategories.has(cat.name);
+    return `<div class="cat-row${on ? '' : ' off'}">
+      <div class="cat-row-swatch" style="background:${cat.color};${on ? '' : 'opacity:0.3;'}">${cat.icon}</div>
+      <div class="cat-row-body" onclick="openEditCategory('${cat.id}')">
         <div class="cat-row-name">${escapeHtml(cat.name)}</div>
         <div class="cat-row-hex">${cat.color}</div>
       </div>
-    </div>`).join('');
+      <button class="cat-eye" onclick="event.stopPropagation();toggleCategoryVisibility('${escapeHtml(cat.name)}')" title="${on ? 'Hide' : 'Show'} on map">
+        ${on ? '👁' : '⊘'}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+function toggleCategoryVisibility(name) {
+  if (activeCategories.has(name)) activeCategories.delete(name);
+  else activeCategories.add(name);
+  renderPointsLayer();
+  renderCategoriesList();
 }
 
 function focusPoint(id) {
