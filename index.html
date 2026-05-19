@@ -1187,8 +1187,8 @@ async function ensureProjectLookup() {
   if (_workbookLoading) return _workbookLoading;
   _workbookLoading = (async () => {
     try {
-      // Resolve workbook site + drive
-      const site = await graphFetch(`/sites/${encodeURIComponent(CONFIG.workbookSitePath)}`);
+      // Resolve workbook site by hostname:path
+      const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
       if (!site) return {};
       const drive = await graphFetch(`/sites/${site.id}/drive`);
       const driveId = drive.id;
