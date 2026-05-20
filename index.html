@@ -1064,135 +1064,6 @@
     letter-spacing: 0.06em;
   }
 
-  /* ── LOG BUTTON ── */
-  .log-btn {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    background: transparent;
-    border: 1px solid #444;
-    color: #aaa;
-    padding: 0.35rem 0.75rem;
-    border-radius: 3px;
-    cursor: pointer;
-    letter-spacing: 0.05em;
-    transition: all 0.2s;
-  }
-  .log-btn:hover { border-color: var(--sage-light); color: var(--sage-light); }
-  .log-btn.has-errors { border-color: #c0392b; color: #e74c3c; }
-  .log-btn.has-warnings { border-color: #b7950b; color: #f1c40f; }
-
-  /* ── LOG PANEL ── */
-  .log-panel {
-    position: fixed;
-    top: 60px;
-    right: 0;
-    width: 420px;
-    max-width: 100vw;
-    height: calc(100vh - 60px);
-    background: var(--ink);
-    color: var(--paper);
-    display: flex;
-    flex-direction: column;
-    z-index: 8000;
-    transform: translateX(100%);
-    transition: transform 0.25s ease;
-    box-shadow: -4px 0 24px rgba(0,0,0,0.25);
-    font-family: 'DM Mono', monospace;
-  }
-  .log-panel.open { transform: translateX(0); }
-  .log-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid #333;
-    flex-shrink: 0;
-  }
-  .log-panel-title {
-    font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--sage-light);
-  }
-  .log-panel-actions { display: flex; gap: 0.5rem; align-items: center; }
-  .log-clear-btn, .log-close-btn {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    background: transparent;
-    border: 1px solid #444;
-    color: #888;
-    padding: 0.2rem 0.5rem;
-    border-radius: 3px;
-    cursor: pointer;
-    letter-spacing: 0.04em;
-  }
-  .log-close-btn { font-size: 0.9rem; padding: 0 0.4rem; }
-  .log-clear-btn:hover, .log-close-btn:hover { border-color: #888; color: var(--paper); }
-  .log-panel-legend {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.4rem 1rem;
-    border-bottom: 1px solid #222;
-    font-size: 0.62rem;
-    color: #666;
-    letter-spacing: 0.05em;
-    flex-shrink: 0;
-  }
-  .log-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 0.25rem;
-  }
-  .log-dot.info  { background: #555; }
-  .log-dot.ok    { background: var(--sage); }
-  .log-dot.warn  { background: #c9a227; }
-  .log-dot.error { background: #c0392b; }
-  .log-entries {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0.5rem 0;
-  }
-  .log-entry {
-    display: grid;
-    grid-template-columns: 54px 8px 1fr;
-    gap: 0 0.5rem;
-    align-items: baseline;
-    padding: 0.28rem 1rem;
-    font-size: 0.68rem;
-    line-height: 1.45;
-    border-bottom: 1px solid #1a1a1a;
-  }
-  .log-entry:last-child { border-bottom: none; }
-  .log-entry.info  .log-entry-dot { background: #555; }
-  .log-entry.ok    .log-entry-dot { background: var(--sage); }
-  .log-entry.warn  .log-entry-dot { background: #c9a227; }
-  .log-entry.error .log-entry-dot { background: #c0392b; }
-  .log-entry.error .log-entry-msg { color: #e74c3c; }
-  .log-entry.warn  .log-entry-msg { color: #f0c040; }
-  .log-entry.ok    .log-entry-msg { color: #b8d8b0; }
-  .log-entry.info  .log-entry-msg { color: #888; }
-  .log-entry-time { color: #444; font-size: 0.62rem; letter-spacing: 0.02em; }
-  .log-entry-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 0.3rem; }
-  .log-entry-msg { color: #aaa; word-break: break-word; }
-  .log-entry-detail {
-    grid-column: 3;
-    color: #555;
-    font-size: 0.62rem;
-    margin-top: 0.1rem;
-    word-break: break-all;
-  }
-  .log-section-divider {
-    padding: 0.5rem 1rem 0.25rem;
-    font-size: 0.6rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #333;
-    border-top: 1px solid #222;
-    margin-top: 0.25rem;
-  }
-
   /* ── NOTIFICATION ── */
   .notification {
     position: fixed;
@@ -1378,9 +1249,6 @@
   </div>
   <div class="header-right">
     <div class="last-sync" id="lastSync">Not synced</div>
-    <button class="log-btn" id="logBtn" onclick="toggleLogPanel()" title="Show diagnostic log">
-      ≡ Log
-    </button>
     <button class="sync-btn" onclick="refreshData()" id="syncBtn">
       ↻ Refresh
     </button>
@@ -1555,84 +1423,6 @@
 </div>
 
 <script>
-// ═════════════════════════════════════════════════════════
-// DIAGNOSTIC LOG
-// ═════════════════════════════════════════════════════════
-const _logEntries = [];
-let   _logPanelOpen = false;
-
-function appLog(level, message, detail) {
-  // level: 'info' | 'ok' | 'warn' | 'error'
-  const entry = { level, message, detail: detail || null, time: new Date() };
-  _logEntries.push(entry);
-  _renderLogEntry(entry);
-  _updateLogBtnState();
-}
-
-function _renderLogEntry(entry) {
-  const container = document.getElementById('logEntries');
-  if (!container) return;
-  const timeStr = entry.time.toTimeString().slice(0, 8);
-  const el = document.createElement('div');
-  el.className = `log-entry ${entry.level}`;
-  el.innerHTML =
-    `<span class="log-entry-time">${_escLog(timeStr)}</span>` +
-    `<span class="log-entry-dot"></span>` +
-    `<span class="log-entry-msg">${_escLog(entry.message)}</span>` +
-    (entry.detail ? `<span class="log-entry-detail">${_escLog(String(entry.detail))}</span>` : '');
-  container.appendChild(el);
-  if (container.scrollHeight - container.scrollTop < container.clientHeight + 80) {
-    container.scrollTop = container.scrollHeight;
-  }
-}
-
-function _addLogDivider(label) {
-  const container = document.getElementById('logEntries');
-  if (!container) return;
-  const el = document.createElement('div');
-  el.className = 'log-section-divider';
-  el.textContent = label;
-  container.appendChild(el);
-}
-
-function _escLog(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function _updateLogBtnState() {
-  const btn = document.getElementById('logBtn');
-  if (!btn) return;
-  const hasErrors   = _logEntries.some(e => e.level === 'error');
-  const hasWarnings = _logEntries.some(e => e.level === 'warn');
-  btn.classList.toggle('has-errors',   hasErrors);
-  btn.classList.toggle('has-warnings', !hasErrors && hasWarnings);
-}
-
-function toggleLogPanel() {
-  _logPanelOpen = !_logPanelOpen;
-  const panel = document.getElementById('logPanel');
-  if (panel) panel.classList.toggle('open', _logPanelOpen);
-  const btn = document.getElementById('logBtn');
-  if (btn) {
-    const active = _logPanelOpen;
-    btn.style.borderColor = active ? 'var(--sage-light)' : '';
-    btn.style.color       = active ? 'var(--sage-light)' : '';
-  }
-  if (_logPanelOpen) {
-    const c = document.getElementById('logEntries');
-    if (c) c.scrollTop = c.scrollHeight;
-  }
-}
-
-function clearLog() {
-  _logEntries.length = 0;
-  const c = document.getElementById('logEntries');
-  if (c) c.innerHTML = '';
-  _updateLogBtnState();
-  const btn = document.getElementById('logBtn');
-  if (btn) { btn.classList.remove('has-errors','has-warnings'); }
-}
-
 // ═══════════════════════════════════════════════════════════
 // CONFIGURATION — edit these to match your environment
 // ═══════════════════════════════════════════════════════════
@@ -1816,7 +1606,7 @@ function startLoadingSafetyTimer() {
   setTimeout(() => {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay && !overlay.classList.contains('hidden')) {
-      appLog('warn', 'Startup timer fired before refresh completed 2014 overlay hidden early');
+      console.warn('Startup loading safety timer hid the overlay; background refresh may still be running.');
       showLoading(false);
       setSubLoadingMessage('Still refreshing live data in background…');
     }
@@ -2249,7 +2039,7 @@ async function resolveCurrentWeekLocationsInBackground(events) {
     renderAll();
     showNotification('Current week locations loaded', 'ok');
   } catch (e) {
-    appLog('error', 'Background project location resolve failed', e.message);
+    console.error('Background location resolve failed', e);
     showNotification('Calendar loaded, but locations failed to resolve', 'error');
   } finally {
     setLoading(`Resolving current week locations: ${needed.length} project(s)…`, false);
@@ -2326,7 +2116,7 @@ async function loadWorkbookRowsOnce() {
       _workbookRowsCache = range.values || [];
       return _workbookRowsCache;
     } catch(e) {
-      appLog('error', 'Workbook lookup failed', e.message);
+      console.error('Workbook lookup failed', e);
       showNotification('Could not load Won Projects workbook', 'error');
       return [];
     } finally {
@@ -2395,7 +2185,7 @@ async function ensureProjectLookupForEvents(events, forceRefresh = false) {
           return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
         });
     if (missing.length) {
-      appLog('info', (forceRefresh ? 'Workbook: re-reading for projects: ' : 'Workbook: checking missing locations for: ') + missing.join(', '));
+      console.log(forceRefresh ? 'Live refresh: re-reading workbook for:' : 'Locations missing from cache; checking workbook:', missing);
       await lookupMissingProjectsFromWorkbook(missing);
     }
     events.forEach(e => enrichEventFromLookup(e, projectLookup));
@@ -2443,7 +2233,7 @@ async function resolvePostcodesBulk(postcodes) {
         });
       }
     } catch(e) {
-      appLog('warn', 'Postcode geocoding batch failed', e.message);
+      console.warn('Postcode batch failed', e);
     }
   }
   return out;
@@ -2508,7 +2298,7 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
       .filter(Boolean);
   } catch(e) {
     _failedMailboxes.add(staff.email);
-    appLog('warn', `Outlook: calendar unavailable for ${staff.name}`, e.message);
+    console.warn('Calendar failed for', staff.name, staff.email, e);
     return [];
   }
 }
@@ -2519,9 +2309,9 @@ function logCalendarDebug(events) {
   const todaySurveys = todayEvents.filter(e => isSurveyType(e.type));
 
   console.groupCollapsed(`Calendar debug — ${todaySurveys.length} survey/site visits today, ${events.length} loaded events total`);
-  appLog('info', `Outlook: fetching calendars for ${staffList.length} staff member(s)`);
-  
-  
+  console.log('staffList count:', staffList.length, staffList);
+  console.log('activeStaff count:', activeStaff.size, [...activeStaff]);
+  console.log('failed mailboxes:', [..._failedMailboxes]);
   console.table(todayEvents.map(e => ({
     person: e.person,
     date: e.date,
@@ -2581,7 +2371,7 @@ async function fetchAllStaffCalendars(forceRefresh = false) {
     logCalendarDebug(allEvents);
 
     if (_failedMailboxes.size > 0) {
-      if (_failedMailboxes.size) appLog('warn', `Outlook: ${_failedMailboxes.size} mailbox(es) could not be read`, [..._failedMailboxes].join(', '));
+      console.warn('Could not read calendars for:', [..._failedMailboxes]);
       showNotification(`Could not read ${_failedMailboxes.size} calendar(s) — check console`, 'error');
     }
     return allEvents;
@@ -2635,10 +2425,10 @@ async function fetchWonProjectsCache() {
       };
     });
 
-    appLog('ok', `Cache: loaded ${Object.keys(projectLookup).length} project location(s) from WonProjectsCache`);
+    console.log(`Loaded ${Object.keys(projectLookup).length} project location(s) from ${CONFIG.projectLocationCacheListName}`);
     return projectLookup;
   } catch (e) {
-    appLog('warn', 'WonProjectsCache unavailable', e.message);
+    console.warn('WonProjectsCache unavailable:', e.message);
     return projectLookup;
   }
 }
@@ -2653,20 +2443,18 @@ async function fetchCalendarCacheFromSharePoint() {
       .map(item => mapEventItem(item, projectLookup))
       .filter(e => e.date && eventFallsInCurrentWeek(e));
 
-    appLog('ok', `Cache: loaded ${events.length} calendar event(s) from StaffCalendarCache`);
+    console.log(`Loaded ${events.length} cached event(s) from ${CONFIG.calendarListName}`);
     return events;
   } catch (e) {
-    appLog('warn', 'StaffCalendarCache unavailable', e.message);
+    console.warn('StaffCalendarCache unavailable:', e.message);
     return [];
   }
 }
 
 async function fetchCachedDataFirst() {
-  _addLogDivider('Cache load');
-  appLog('info', 'Reading SharePoint cache lists…');
-  setMainLoadingMessage('Loading calendars…');
-  setSubLoadingMessage('Reading cached data…');
-  setLoading('reading-cache', true);
+  setMainLoadingMessage('Loading cached calendar data…');
+  setSubLoadingMessage('Reading SharePoint cache lists…');
+  setLoading('Reading SharePoint cache…', true);
   try {
     await fetchWonProjectsCache();
     const cachedEvents = await fetchCalendarCacheFromSharePoint();
@@ -2677,21 +2465,19 @@ async function fetchCachedDataFirst() {
     _eventsCacheReady = true;
     return cachedEvents;
   } catch (e) {
-    appLog('error', 'Cache read failed', e.message);
+    console.warn('Cache read failed:', e.message);
     const weekKey = getWeekKey(currentWeekStart);
     _loadedWeekEvents[weekKey] = [];
     allEvents = Object.values(_loadedWeekEvents).flat();
     return [];
   } finally {
-    setLoading('reading-cache', false);
+    setLoading('Reading SharePoint cache…', false);
   }
 }
 
 async function refreshFromLiveSourcesInBackground() {
-  _addLogDivider('Live refresh');
-  appLog('info', 'Starting live refresh from Outlook and workbook…');
-  setSubLoadingMessage('Syncing live data from Outlook…');
-  setLoading('live-refresh', true);
+  setSubLoadingMessage('Refreshing live Outlook/workbook data in background…');
+  setLoading('Refreshing live data in background…', true);
   try {
     const freshEvents = await fetchAllStaffCalendars(true);
     await ensureProjectLookupForEvents(freshEvents, true);
@@ -2708,13 +2494,13 @@ async function refreshFromLiveSourcesInBackground() {
     upsertCalendarCacheItems(weekEvents);
     upsertWonProjectsCacheItems(weekEvents);
 
-    appLog('ok', 'Live refresh complete — display updated');
+    document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
     if (CONFIG.backgroundRefreshMessage) showNotification('Live calendar data refreshed', 'ok');
   } catch (e) {
-    appLog('error', 'Live refresh failed', e.message);
+    console.warn('Live background refresh failed:', e);
     showNotification('Cached view opened, but live refresh failed', 'error');
   } finally {
-    setLoading('live-refresh', false);
+    setLoading('Refreshing live data in background…', false);
     clearSubLoadingMessage();
   }
 }
@@ -2755,10 +2541,10 @@ async function upsertCalendarCacheItems(events) {
         } else {
           await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) { appLog('warn', `StaffCalendarCache: failed to write event “${fields.Title}”`, inner.message); }
+      } catch (inner) { console.warn('StaffCalendarCache write failed:', inner.message, fields.Title); }
     }
-    appLog('ok', `Cache write: StaffCalendarCache — ${(events || []).length} event(s) upserted`);
-  } catch (e) { appLog('error', 'StaffCalendarCache write-back failed', e.message); }
+    console.log(`StaffCalendarCache updated: ${(events || []).length} event(s)`);
+  } catch (e) { console.warn('StaffCalendarCache update skipped:', e.message); }
 }
 
 async function upsertWonProjectsCacheItems(events) {
@@ -2782,7 +2568,7 @@ async function upsertWonProjectsCacheItems(events) {
       const postcodeOk = isValidPostcode(loc.postcode);
       const fields = {
         Title: String(e.projectNo),
-        ProjectNumber: String(e.projectNo),
+        // NB: WonProjectsCache has no ProjectNumber column — project no. is stored in Title only.
         Site: String(loc.site || ''),
         Town: String(loc.town || ''),
         County: String(loc.county || ''),
@@ -2796,10 +2582,10 @@ async function upsertWonProjectsCacheItems(events) {
         } else {
           await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) { appLog('warn', `WonProjectsCache: failed to write project ${e.projectNo}`, inner.message); }
+      } catch (inner) { console.warn('WonProjectsCache write failed:', inner.message, e.projectNo); }
     }
-    appLog('ok', `Cache write: WonProjectsCache — ${seen.size} project location(s) upserted`);
-  } catch (e) { appLog('error', 'WonProjectsCache write-back failed', e.message); }
+    console.log(`WonProjectsCache updated: ${seen.size} project(s)`);
+  } catch (e) { console.warn('WonProjectsCache update skipped:', e.message); }
 }
 
 async function fetchSharePointData() {
@@ -2809,7 +2595,7 @@ async function fetchSharePointData() {
       setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
       return allEvents;
     } catch (e) {
-      appLog('error', 'Cache load failed — falling back to live refresh', e.message);
+      console.warn('Cache-first load failed; rendering empty app and refreshing live in background:', e.message);
       allEvents = [];
       setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
       return allEvents;
@@ -2900,7 +2686,7 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
-    appLog('warn', 'Vehicle bookings calendar unavailable', e.message);
+    console.warn('Vehicle bookings unavailable:', e.message);
     _vehicleBookingsByWeek[weekKey] = [];
     return _vehicleBookingsByWeek[weekKey];
   }
@@ -4202,22 +3988,5 @@ function showNotification(msg, type='ok') {
   setTimeout(() => el.classList.remove('show'), 3500);
 }
 </script>
-<!-- ── Diagnostic Log Panel ───────────────────────────────────── -->
-<div id="logPanel" class="log-panel">
-  <div class="log-panel-header">
-    <span class="log-panel-title">Diagnostic Log</span>
-    <div class="log-panel-actions">
-      <button class="log-clear-btn" onclick="clearLog()">Clear</button>
-      <button class="log-close-btn" onclick="toggleLogPanel()">×</button>
-    </div>
-  </div>
-  <div class="log-panel-legend">
-    <span class="log-dot info"></span>Info
-    <span class="log-dot ok"></span>Success
-    <span class="log-dot warn"></span>Warning
-    <span class="log-dot error"></span>Error
-  </div>
-  <div class="log-entries" id="logEntries"></div>
-</div>
 </body>
 </html>
