@@ -1462,6 +1462,31 @@ async function graphFetch(path) {
   return res.json();
 }
 
+async function graphFetchPaged(path) {
+  const token = await getGraphToken();
+  if (!token) return null;
+
+  let url = path.startsWith('https://') ? path : `https://graph.microsoft.com/v1.0${path}`;
+  const value = [];
+  let lastPayload = null;
+
+  while (url) {
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json',
+        'Prefer': 'HonorNonIndexedQueriesWarningMayFailRandomly'
+      },
+    });
+    if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+    lastPayload = await res.json();
+    if (Array.isArray(lastPayload.value)) value.push(...lastPayload.value);
+    url = lastPayload['@odata.nextLink'] || '';
+  }
+
+  return { ...(lastPayload || {}), value };
+}
+
 // Cache for resolved Graph list IDs
 const _listIdCache = {};
 async function getListId(listName) {
@@ -1725,32 +1750,32 @@ function buildStaffFilter() {
   const container = document.getElementById('staffFilter');
   container.innerHTML = '';
 
-  // Show only staff who have events this week
+  // Important: show the full staff list. The previous version only showed staff
+  // with events in the current week, then overwrote activeStaff to that reduced
+  // set. That could hide valid site visits downstream in renderAll().
+  const visibleStaff = staffList.slice();
+
+  // First render: select everyone by default. After that, preserve user toggles.
+  if (activeStaff.size === 0 && visibleStaff.length > 0) {
+    activeStaff = new Set(visibleStaff.map(s => s.name));
+  }
+
   const ws = currentWeekStart;
   const we = getWeekEnd(ws);
   const onSiteThisWeek = new Set();
   allEvents.forEach(e => {
     const d = new Date(e.date);
-    if (d >= ws && d <= we) onSiteThisWeek.add(e.person);
+    if (d >= ws && d <= we && isSurveyType(e.type)) onSiteThisWeek.add(e.person);
   });
-  const visibleStaff = staffList.filter(s => onSiteThisWeek.has(s.name));
-
-  // Update activeStaff to only include visible staff (preserve user toggles where possible)
-  const newActive = new Set();
-  visibleStaff.forEach(s => {
-    if (activeStaff.has(s.name) || activeStaff.size === 0) newActive.add(s.name);
-  });
-  // If we filtered everyone out (e.g. first render), select all visible
-  if (newActive.size === 0) visibleStaff.forEach(s => newActive.add(s.name));
-  activeStaff = newActive;
 
   visibleStaff.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'staff-chip' + (activeStaff.has(s.name) ? ' active' : '');
     chip.textContent = shortName(s.name);
-    chip.title = s.name;
+    chip.title = onSiteThisWeek.has(s.name) ? `${s.name} — has site visit this week` : s.name;
     chip.style.borderColor = s.color;
     chip.style.color = s.color;
+    chip.style.opacity = onSiteThisWeek.has(s.name) ? '1' : '0.55';
     chip.style.backgroundColor = activeStaff.has(s.name) ? s.color + '22' : 'transparent';
     chip.dataset.name = s.name;
     chip.addEventListener('click', () => toggleStaff(s.name, chip, s.color));
@@ -1760,7 +1785,7 @@ function buildStaffFilter() {
   if (visibleStaff.length === 0) {
     const note = document.createElement('div');
     note.style.cssText = "font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--text-secondary);";
-    note.textContent = 'No staff on site this week';
+    note.textContent = 'No staff loaded';
     container.appendChild(note);
     return;
   }
@@ -1996,13 +2021,15 @@ let _eventsCacheReady = false;
 let _failedMailboxes = new Set();  // staff we couldn't read for any reason
 
 function classifyEvent(ev) {
-  const cats = ev.categories || [];
+  const cats = (ev.categories || []).map(c => String(c || '').trim());
+  const catsLower = cats.map(c => c.toLowerCase());
   const subject = (ev.subject || '').trim();
-  if (cats.includes('Field survey'))                    return 'Field survey';
-  if (cats.includes('Field survey (out of hours)'))     return 'Field survey (out of hours)';
-  if (ev.isAllDay && /^office\b/i.test(subject))        return 'Office';
-  if (ev.isAllDay && /^wfh\b/i.test(subject))           return 'WFH';
-  if (ev.isAllDay && cats.some(c => /^A\/L/i.test(c)))  return 'Leave';
+
+  if (catsLower.includes('field survey'))                    return 'Field survey';
+  if (catsLower.includes('field survey (out of hours)'))     return 'Field survey (out of hours)';
+  if (ev.isAllDay && /^office\b/i.test(subject))            return 'Office';
+  if (ev.isAllDay && /^wfh\b/i.test(subject))               return 'WFH';
+  if (ev.isAllDay && cats.some(c => /^A\/L/i.test(c)))      return 'Leave';
   return null;
 }
 
@@ -2011,13 +2038,13 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
   const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}` +
                `&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
   try {
-    const data = await graphFetch(path);
+    const data = await graphFetchPaged(path);
     if (!data || !data.value) return [];
     return data.value
       .map(ev => {
         const eventType = classifyEvent(ev);
         if (!eventType) return null;
-        const projNo = (eventType.startsWith('Field survey'))
+        const projNo = isSurveyType(eventType)
           ? (extractProjectNo(ev.subject) || '')
           : '';
         return {
@@ -2039,8 +2066,31 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
       .filter(Boolean);
   } catch(e) {
     _failedMailboxes.add(staff.email);
+    console.warn('Calendar failed for', staff.name, staff.email, e);
     return [];
   }
+}
+
+function logCalendarDebug(events) {
+  const today = fmtDateLocal(new Date());
+  const todayEvents = events.filter(e => e.date === today);
+  const todaySurveys = todayEvents.filter(e => isSurveyType(e.type));
+
+  console.groupCollapsed(`Calendar debug — ${todaySurveys.length} survey/site visits today, ${events.length} loaded events total`);
+  console.log('staffList count:', staffList.length, staffList);
+  console.log('activeStaff count:', activeStaff.size, [...activeStaff]);
+  console.log('failed mailboxes:', [..._failedMailboxes]);
+  console.table(todayEvents.map(e => ({
+    person: e.person,
+    date: e.date,
+    type: e.type,
+    projectNo: e.projectNo,
+    title: e.title,
+    hasLatLng: Number.isFinite(e.lat) && Number.isFinite(e.lng),
+    postcode: e.postcode || '',
+    projectInLookup: !!e._projInLookup
+  })));
+  console.groupEnd();
 }
 
 async function fetchAllStaffCalendars(forceRefresh = false) {
@@ -2071,9 +2121,11 @@ async function fetchAllStaffCalendars(forceRefresh = false) {
 
     allEvents = collected;
     _eventsCacheReady = true;
+    logCalendarDebug(allEvents);
 
     if (_failedMailboxes.size > 0) {
-      console.log('Could not read calendars for:', [..._failedMailboxes]);
+      console.warn('Could not read calendars for:', [..._failedMailboxes]);
+      showNotification(`Could not read ${_failedMailboxes.size} calendar(s) — check console`, 'error');
     }
     return allEvents;
   } finally {
