@@ -2561,6 +2561,7 @@ let _vehicleBookingsByWeek = {};  // week key -> booking[]
 async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), endDate = getWeekEnd(currentWeekStart)) {
   const weekKey = getWeekKey(startDate);
   if (_vehicleBookingsByWeek[weekKey]) return _vehicleBookingsByWeek[weekKey];
+
   try {
     const startISO = startDate.toISOString().split('.')[0] + 'Z';
     const endForGraph = new Date(endDate);
@@ -2568,17 +2569,22 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     const endISO = endForGraph.toISOString().split('.')[0] + 'Z';
     const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
     const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
+
     const data = await graphFetchPaged(path);
     const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
       const vehicleFromCategory = extractVehicleName(ev.categories || []);
+
       return {
-        title:   subject,
-        vehicle: vehicleFromCategory,
-        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
-        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
+        title:     subject,
+        vehicle:   vehicleFromCategory, // no fallback: if category is missing, leave blank
+        projectNo: extractProjectNo(subject),
+        initials:  extractInitialsTokens(subject),
+        start:     ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:       ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
+
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
@@ -2589,6 +2595,94 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
 }
 
 // Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
+
+function extractInitialsTokens(str) {
+  const tokens = (str || '').toUpperCase().match(/\b[A-Z]{2,4}\b/g) || [];
+  return new Set(tokens);
+}
+
+function eventDayRange(event) {
+  const d = new Date(event.date);
+  const start = new Date(d);
+  start.setHours(0,0,0,0);
+  const end = new Date(d);
+  end.setHours(23,59,59,999);
+  return { start, end };
+}
+
+function bookingOverlapsEventDay(booking, event) {
+  const r = eventDayRange(event);
+  return booking.start <= r.end && booking.end >= r.start;
+}
+
+function vehicleBookingMatchesEvent(booking, event, staff) {
+  if (!booking || !event || !staff) return false;
+  if (!bookingOverlapsEventDay(booking, event)) return false;
+
+  const eventProject = event.projectNo || extractProjectNo(event.title || '');
+  const bookingProject = booking.projectNo || extractProjectNo(booking.title || '');
+
+  if (eventProject && bookingProject && eventProject === bookingProject) return true;
+
+  const possibleInitials = initialsForName(staff.name || event.person || '');
+  if (booking.initials && possibleInitials.some(i => i && booking.initials.has(i.toUpperCase()))) return true;
+
+  return false;
+}
+
+function assignVehiclesToSiteVisits(events, bookings) {
+  if (!Array.isArray(events) || !Array.isArray(bookings) || bookings.length === 0) {
+    (events || []).forEach(e => { if (e && isSurveyType(e.type)) e.vehicle = ''; });
+    return;
+  }
+
+  const staffByName = new Map(staffList.map(s => [s.name, s]));
+  const groups = new Map();
+
+  events.filter(e => e && isSurveyType(e.type)).forEach(e => {
+    e.vehicle = '';
+    const projectKey = e.projectNo || extractProjectNo(e.title || '') || (e.title || '').trim();
+    const key = `${e.date}|${projectKey}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  });
+
+  groups.forEach(group => {
+    const first = group[0];
+    const projectNo = first.projectNo || extractProjectNo(first.title || '');
+
+    const candidates = bookings.filter(b =>
+      b.vehicle &&
+      group.some(e => bookingOverlapsEventDay(b, e))
+    );
+
+    if (projectNo) {
+      const projectMatches = candidates.filter(b => b.projectNo === projectNo);
+      const uniqueProjectVehicles = [...new Set(projectMatches.map(b => b.vehicle).filter(Boolean))];
+
+      if (uniqueProjectVehicles.length === 1) {
+        group.forEach(e => { e.vehicle = uniqueProjectVehicles[0]; });
+        return;
+      }
+
+      if (uniqueProjectVehicles.length > 1) {
+        return;
+      }
+    }
+
+    const initialsMatches = candidates.filter(b => group.some(e => {
+      const staff = staffByName.get(e.person) || { name: e.person };
+      return vehicleBookingMatchesEvent(b, e, staff);
+    }));
+
+    const uniqueInitialVehicles = [...new Set(initialsMatches.map(b => b.vehicle).filter(Boolean))];
+    if (uniqueInitialVehicles.length === 1) {
+      group.forEach(e => { e.vehicle = uniqueInitialVehicles[0]; });
+    }
+  });
+}
+
+
 function initialsForName(name) {
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
@@ -2600,26 +2694,7 @@ function initialsForName(name) {
 }
 
 function attachVehicles(events, bookings) {
-  if (!bookings || !bookings.length) return;
-  events.forEach(e => {
-    if (!isSurveyType(e.type)) return;
-    const eventDate = new Date(e.date);
-    if (isNaN(eventDate)) return;
-    const initials = initialsForName(e.person);
-    const dayMs = 86400000;
-    const evDayStart = new Date(eventDate); evDayStart.setHours(0,0,0,0);
-    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23,59,59,999);
-    const matchable = bookings.filter(b =>
-      (b.end.getTime() + dayMs) >= evDayStart.getTime() &&
-      (b.start.getTime() - dayMs) <= evDayEnd.getTime()
-    );
-    if (!matchable.length) return;
-    const initialMatch = matchable.find(b => {
-      const upper = b.title.toUpperCase();
-      return initials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
-    });
-    e.vehicle = (initialMatch || matchable[0]).vehicle;
-  });
+  assignVehiclesToSiteVisits(events, bookings);
 }
 
 // ═══════════════════════════════════════════════════════════
