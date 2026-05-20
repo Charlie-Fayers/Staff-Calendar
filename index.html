@@ -1507,6 +1507,31 @@ const COLOUR_PALETTE = [
   '#7a3a8a','#4a7a30','#8a7030','#305a8a','#6a3050',
 ];
 
+
+function extractVehicleName(categories = []) {
+  const vehiclePrefixes = [
+    'Duster -',
+    'Kona -',
+    'Niro -',
+    'Partner -',
+    'Ranger -',
+    'Suzi -'
+  ];
+
+  for (const cat of categories) {
+    const match = vehiclePrefixes.find(v =>
+      (cat || '').trim().toLowerCase().startsWith(v.toLowerCase())
+    );
+
+    if (match) {
+      return match.split(' - ')[0];
+    }
+  }
+
+  return '';
+}
+
+
 // ═══════════════════════════════════════════════════════════
 // DEMO DATA — replaced by live SharePoint data in production
 // ═══════════════════════════════════════════════════════════
@@ -2057,6 +2082,7 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
           title:     ev.subject || '',
           type:      eventType,
           projectNo: projNo,
+      vehicle: extractVehicleName(ev.categories || []),
           isAllDay:  !!ev.isAllDay,
           site: '', town: '', county: '', postcode: '',
           lat: NaN, lng: NaN, vehicle: '',
@@ -2377,7 +2403,8 @@ function renderSidebar() {
         <div class="event-body">
           <div class="event-person" style="color:${color}">${e.person}</div>
           <div class="event-title">${e.title}</div>
-          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>${vehTag}${warnTag}</div>
+          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>
+              ${e.vehicle ? `<span class="vehicle-tag">🚙 ${e.vehicle}</span>` : ''}${vehTag}${warnTag}</div>
         </div>
       </div>`;
     });
