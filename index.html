@@ -1949,15 +1949,41 @@ async function loadData() {
     }
     buildStaffFilter();   // refresh chips based on who's actually on site this week
     renderAll();
-    if (projectLookup) {
-      showNotification('Calendar data loaded', 'ok');
-    } else {
-      showNotification('Calendar loaded — locations resolving in background', 'ok');
-    }
+
+    // Calendar is now usable immediately. Resolve locations afterwards.
+    showNotification('Calendar loaded — resolving current week locations', 'ok');
+    resolveCurrentWeekLocationsInBackground(filteredEvents.length ? filteredEvents : allEvents);
   } catch(e) {
     showNotification('Failed to load data: ' + e.message, 'error');
   } finally {
     showLoading(false);
+  }
+}
+
+
+let _locationResolveRun = 0;
+async function resolveCurrentWeekLocationsInBackground(events) {
+  const runId = ++_locationResolveRun;
+  const targetEvents = (events || []).filter(e => e && isSurveyType(e.type));
+  const needed = getNeededProjectNos(targetEvents);
+  if (!needed.length) return;
+
+  setMainLoadingMessage('Loading calendar data…');
+  setSubLoadingMessage(`Resolving current week locations: ${needed.length} project(s)…`);
+  setLoading(`Resolving current week locations: ${needed.length} project(s)…`, true);
+
+  try {
+    await ensureProjectLookupForEvents(targetEvents);
+    if (runId !== _locationResolveRun) return; // user changed week while lookup was running
+    targetEvents.forEach(e => enrichEventFromLookup(e, projectLookup));
+    renderAll();
+    showNotification('Current week locations loaded', 'ok');
+  } catch (e) {
+    console.error('Background location resolve failed', e);
+    showNotification('Calendar loaded, but locations failed to resolve', 'error');
+  } finally {
+    setLoading(`Resolving current week locations: ${needed.length} project(s)…`, false);
+    clearSubLoadingMessage();
   }
 }
 
@@ -1972,15 +1998,12 @@ async function refreshData() {
 }
 
 // ── Project location lookup/cache ──────────────────────────
-// Fast path: read coordinates from a small SharePoint list first, then only fall
-// back to the Won Projects workbook for the project numbers that are actually
-// needed for the loaded week. This avoids loading/geocoding every project at
-// initial page load.
+// Fast path: load calendar events first, render the app, then resolve locations
+// for only the project numbers needed by the currently loaded week.
+// SharePoint location caching is intentionally disabled for now.
 let projectLookup = {};      // { '1234': { site, town, county, postcode, lat, lng } }
 let _workbookRowsCache = null;
 let _workbookLoading = null;
-let _spLocationCacheLoaded = false;
-let _spLocationCacheByProject = {};
 
 function normaliseProjectNo(v) {
   let num = ('' + (v || '')).trim();
@@ -1998,48 +2021,13 @@ function getNeededProjectNos(events) {
   )];
 }
 
-function mapCacheFieldsToLocation(fields) {
-  if (!fields) return null;
-  const projectNo = normaliseProjectNo(fields.Title || fields.ProjectNumber || fields.ProjectNo);
-  if (!projectNo) return null;
-  const lat = parseFloat(fields.Latitude);
-  const lng = parseFloat(fields.Longitude);
-  return {
-    projectNo,
-    site:     String(fields.Site || fields.SiteName || ''),
-    town:     String(fields.Town || ''),
-    county:   String(fields.County || ''),
-    postcode: String(fields.Postcode || ''),
-    lat:      Number.isFinite(lat) ? lat : null,
-    lng:      Number.isFinite(lng) ? lng : null,
-    cacheItemId: fields.id || null,
-  };
-}
-
 
 
 async function saveProjectLocationsToCache(locations) {
-  const valid = (locations || []).filter(l => l && l.projectNo && Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)));
-  if (!valid.length) return;
-  try {
-    const listId = await getListId(CONFIG.projectLocationCacheListName);
-    await Promise.all(valid.map(loc => graphMutate('POST',
-      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
-      { fields: {
-        Title:     String(loc.projectNo),
-        Site:      loc.site || '',
-        Town:      loc.town || '',
-        County:    loc.county || '',
-        Postcode:  loc.postcode || '',
-        Latitude:  String(loc.lat),
-        Longitude: String(loc.lng),
-        LastUpdated: new Date().toISOString(),
-      }}
-    ).catch(e => console.warn('Could not write project location cache item', loc.projectNo, e))));
-  } catch(e) {
-    console.warn('Could not save project locations to SharePoint cache', e);
-  }
+  // SharePoint project-location cache disabled for this version.
+  return;
 }
+
 
 async function loadWorkbookRowsOnce() {
   if (_workbookRowsCache) return _workbookRowsCache;
@@ -2083,6 +2071,7 @@ async function lookupMissingProjectsFromWorkbook(projectNos) {
   const out = {};
   if (!needed.size) return out;
 
+  setSubLoadingMessage(`Checking Won Projects workbook for ${needed.size} current-week project(s)…`);
   const rows = await loadWorkbookRowsOnce();
   const postcodes = new Set();
   for (let i = 1; i < rows.length; i++) {
@@ -2303,8 +2292,10 @@ async function fetchAllStaffCalendars(forceRefresh = false) {
     );
     const collected = results.flat();
 
-    // Resolve only the project locations needed for this loaded week.
-    await ensureProjectLookupForEvents(collected);
+    // Do NOT resolve locations here. Rendering the calendar should not wait for
+    // the Won Projects workbook. Locations are resolved in the background after
+    // the events are visible.
+    collected.forEach(e => enrichEventFromLookup(e, projectLookup));
 
     // Attach vehicles for the same week window.
     const vehicles = await fetchVehicleBookings(weekStart, endForGraph);
@@ -2346,8 +2337,6 @@ async function fetchSharePointData() {
 async function refreshCalendars() {
   _eventsCacheReady = false;
   _loadedWeekEvents = {};
-  _spLocationCacheLoaded = false;
-  _spLocationCacheByProject = {};
   _vehicleBookingsByWeek = {};
   projectLookup = {};
   await loadData();
