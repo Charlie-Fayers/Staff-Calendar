@@ -1438,6 +1438,7 @@ const CONFIG = {
   siteId:                'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
   staffListName:         'Staff',
   calendarListName:      'StaffCalendarCache',
+  projectLocationCacheListName: 'WonProjectsCache',
   pointsListName:        'ManualPoints',
   categoriesListName:    'ManualPointCategories',
 
@@ -1452,11 +1453,10 @@ const CONFIG = {
   colCounty:        5,  // F
   colPostcode:      6,  // G — new column
 
-  // Performance tuning
-  projectLookupMaxRows: 6000,        // only read A:G for initial/project lookups, not the full usedRange
-  backgroundWarmPastWeeks: 1,        // preload one week back
-  backgroundWarmFutureWeeks: 8,      // preload eight weeks ahead
-  backgroundWarmDelayMs: 750,        // let the first render settle before background work
+  // Cache-first loading
+  cacheFirstLoad: true,
+  backgroundRefreshAfterCacheLoad: true,
+  backgroundRefreshMessage: true,
 
   // Set to true when running against the real Graph API
   useLiveData: true,
@@ -1532,6 +1532,39 @@ async function graphFetchPaged(path) {
   }
 
   return { ...(lastPayload || {}), value };
+}
+
+
+async function graphPost(path, body) {
+  const token = await getGraphToken();
+  if (!token) return null;
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(`Graph POST ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+async function graphPatch(path, body) {
+  const token = await getGraphToken();
+  if (!token) return null;
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(`Graph PATCH ${res.status}: ${await res.text()}`);
+  return res.status === 204 ? {} : res.json();
 }
 
 // Cache for resolved Graph list IDs
@@ -1968,7 +2001,7 @@ function selectAllStaff() {
 // ═══════════════════════════════════════════════════════════
 async function loadData() {
   showLoading(true);
-  document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading calendar data…';
+  setMainLoadingMessage(CONFIG.cacheFirstLoad ? 'Loading cached calendar data…' : 'Loading calendar data…');
   try {
     if (CONFIG.useLiveData) {
       allEvents = await fetchSharePointData();
@@ -1981,8 +2014,10 @@ async function loadData() {
     renderAll();
 
     // Calendar is now usable immediately. Resolve locations afterwards.
-    showNotification('Calendar loaded — resolving current week locations', 'ok');
-    resolveCurrentWeekLocationsInBackground(filteredEvents.length ? filteredEvents : allEvents);
+    showNotification(CONFIG.cacheFirstLoad ? 'Cached data loaded — refreshing live data in background' : 'Calendar loaded — resolving current week locations', 'ok');
+    if (!CONFIG.cacheFirstLoad) {
+      resolveCurrentWeekLocationsInBackground(filteredEvents.length ? filteredEvents : allEvents);
+    }
   } catch(e) {
     showNotification('Failed to load data: ' + e.message, 'error');
   } finally {
@@ -2014,81 +2049,7 @@ async function resolveCurrentWeekLocationsInBackground(events) {
   } finally {
     setLoading(`Resolving current week locations: ${needed.length} project(s)…`, false);
     clearSubLoadingMessage();
-
-    // After the current week is usable, quietly preload other weeks and their
-    // locations so later week switching is much faster.
-    warmCalendarsAndLocationsInBackground();
   }
-}
-
-
-function addWeeks(date, weeks) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + (weeks * 7));
-  return getWeekStart(d);
-}
-
-async function fetchWeekCalendarsAndVehicles(weekStart, forceRefresh = false) {
-  const originalWeekStart = currentWeekStart;
-  currentWeekStart = getWeekStart(weekStart);
-  try {
-    return await fetchAllStaffCalendars(forceRefresh);
-  } finally {
-    currentWeekStart = originalWeekStart;
-  }
-}
-
-async function warmCalendarsAndLocationsInBackground() {
-  if (_backgroundWarmupStarted) return;
-  _backgroundWarmupStarted = true;
-  const warmupId = ++_backgroundWarmupCancel;
-
-  await new Promise(r => setTimeout(r, Number(CONFIG.backgroundWarmDelayMs || 750)));
-
-  const baseWeek = getWeekStart(new Date());
-  const weeks = [];
-  const past = Number(CONFIG.backgroundWarmPastWeeks || 0);
-  const future = Number(CONFIG.backgroundWarmFutureWeeks || 0);
-
-  for (let i = -past; i <= future; i++) {
-    const wk = addWeeks(baseWeek, i);
-    if (getWeekKey(wk) !== getWeekKey(currentWeekStart)) weeks.push(wk);
-  }
-
-  for (let i = 0; i < weeks.length; i++) {
-    if (warmupId !== _backgroundWarmupCancel) return;
-    const wk = weeks[i];
-    const label = wk.toLocaleDateString('en-GB', { day:'2-digit', month:'short' });
-
-    try {
-      setMainLoadingMessage('Loading calendar data…');
-      setSubLoadingMessage(`Background preload ${i + 1}/${weeks.length}: week from ${label}`);
-      setLoading(`Background preload: week from ${label}`, true);
-
-      const beforeKey = getWeekKey(currentWeekStart);
-      const events = await fetchWeekCalendarsAndVehicles(wk, false);
-      const wkEnd = getWeekEnd(wk);
-      const weekEvents = events.filter(e => {
-        const d = new Date(e.date);
-        return d >= wk && d <= wkEnd;
-      });
-
-      await ensureProjectLookupForEvents(weekEvents);
-
-      // Re-render only if the user is still viewing the week that was current
-      // when this background pass started. Otherwise avoid jumping the UI.
-      if (getWeekKey(currentWeekStart) === beforeKey) {
-        renderAll();
-      }
-    } catch (e) {
-      console.warn('Background preload failed for week', wk, e);
-    } finally {
-      setLoading(`Background preload: week from ${label}`, false);
-    }
-  }
-
-  clearSubLoadingMessage();
-  showNotification('Background calendar/location preload complete', 'ok');
 }
 
 async function refreshData() {
@@ -2108,11 +2069,6 @@ async function refreshData() {
 let projectLookup = {};      // { '1234': { site, town, county, postcode, lat, lng } }
 let _workbookRowsCache = null;
 let _workbookLoading = null;
-
-let _projectWorkbookFileRef = null;  // { driveId, fileId }
-let _backgroundWarmupStarted = false;
-let _backgroundWarmupCancel = 0;
-
 
 function normaliseProjectNo(v) {
   let num = ('' + (v || '')).trim();
@@ -2138,50 +2094,30 @@ async function saveProjectLocationsToCache(locations) {
 }
 
 
-async function getProjectWorkbookFileRef() {
-  if (_projectWorkbookFileRef) return _projectWorkbookFileRef;
-
-  const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
-  if (!site) return null;
-
-  const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
-  const drives = drivesRes.value || [];
-
-  for (const d of drives) {
-    try {
-      const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
-      const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
-      if (match) {
-        _projectWorkbookFileRef = { driveId: d.id, fileId: match.id };
-        return _projectWorkbookFileRef;
-      }
-    } catch(e) {
-      console.warn(`Search in drive "${d.name}" failed`, e);
-    }
-  }
-
-  showNotification('Won Projects workbook not found on Data site', 'error');
-  return null;
-}
-
 async function loadWorkbookRowsOnce() {
-  // Load only the columns used for project lookups, rather than the workbook's
-  // full usedRange. The app needs A, D, E, F and G, so A:G is enough.
   if (_workbookRowsCache) return _workbookRowsCache;
   if (_workbookLoading) return _workbookLoading;
-
   _workbookLoading = (async () => {
-    setLoading('Checking Won Projects workbook columns A:G…', true);
+    setLoading('Checking Won Projects workbook…', true);
     try {
-      const ref = await getProjectWorkbookFileRef();
-      if (!ref) return [];
-
+      const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
+      if (!site) return [];
+      const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
+      const drives = drivesRes.value || [];
+      let file = null, driveId = null;
+      for (const d of drives) {
+        try {
+          const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
+          const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
+          if (match) { file = match; driveId = d.id; break; }
+        } catch(e) { console.warn(`Search in drive "${d.name}" failed`, e); }
+      }
+      if (!file) {
+        showNotification('Won Projects workbook not found on Data site', 'error');
+        return [];
+      }
       const sheet = encodeURIComponent(CONFIG.workbookSheet);
-      const maxRows = Number(CONFIG.projectLookupMaxRows || 6000);
-      const address = `A1:G${maxRows}`;
-
-      setSubLoadingMessage(`Reading Won Projects ${address}…`);
-      const range = await graphFetch(`/drives/${ref.driveId}/items/${ref.fileId}/workbook/worksheets('${sheet}')/range(address='${address}')`);
+      const range = await graphFetch(`/drives/${driveId}/items/${file.id}/workbook/worksheets('${sheet}')/usedRange(valuesOnly=true)`);
       _workbookRowsCache = range.values || [];
       return _workbookRowsCache;
     } catch(e) {
@@ -2189,20 +2125,18 @@ async function loadWorkbookRowsOnce() {
       showNotification('Could not load Won Projects workbook', 'error');
       return [];
     } finally {
-      setLoading('Checking Won Projects workbook columns A:G…', false);
+      setLoading('Checking Won Projects workbook…', false);
     }
   })();
-
   return _workbookLoading;
 }
-
 
 async function lookupMissingProjectsFromWorkbook(projectNos) {
   const needed = new Set((projectNos || []).map(normaliseProjectNo).filter(Boolean));
   const out = {};
   if (!needed.size) return out;
 
-  setSubLoadingMessage(`Checking Won Projects workbook for ${needed.size} project(s)…`);
+  setSubLoadingMessage(`Checking Won Projects workbook for ${needed.size} current-week project(s)…`);
   const rows = await loadWorkbookRowsOnce();
   const postcodes = new Set();
   for (let i = 1; i < rows.length; i++) {
@@ -2459,10 +2393,197 @@ function enrichEventFromLookup(e, lookup) {
   e._hasValidPostcode = isValidPostcode(en.postcode);
 }
 
+
+function eventFallsInCurrentWeek(e) {
+  const ws = getWeekStart(currentWeekStart);
+  const we = getWeekEnd(ws);
+  const d = new Date(e.date);
+  return d >= ws && d <= we;
+}
+
+async function fetchWonProjectsCache() {
+  try {
+    const listId = await getListId(CONFIG.projectLocationCacheListName);
+    const data = await graphFetchPaged(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=5000`);
+    const items = data.value || [];
+    items.forEach(item => {
+      const f = item.fields || {};
+      const projectNo = normaliseProjectNo(f.ProjectNumber || f.Title || f.Project || f.Code || '');
+      if (!projectNo) return;
+      projectLookup[projectNo] = {
+        projectNo,
+        site:     String(f.Site || f.SiteName || f.Title || '').trim(),
+        town:     String(f.Town || '').trim(),
+        county:   String(f.County || '').trim(),
+        postcode: String(f.Postcode || f.PostCode || '').trim(),
+        lat:      f.Latitude  != null ? Number(f.Latitude)  : (f.lat != null ? Number(f.lat) : null),
+        lng:      f.Longitude != null ? Number(f.Longitude) : (f.lng != null ? Number(f.lng) : null),
+      };
+    });
+    return projectLookup;
+  } catch (e) {
+    console.warn('Project location cache unavailable; falling back to workbook as needed:', e.message);
+    return projectLookup;
+  }
+}
+
+async function fetchCalendarCacheFromSharePoint() {
+  const listId = await getListId(CONFIG.calendarListName);
+  const data = await graphFetchPaged(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=5000`);
+  const items = data.value || [];
+
+  const events = items
+    .map(item => mapEventItem(item, projectLookup))
+    .filter(e => e.date && eventFallsInCurrentWeek(e));
+
+  console.log(`Loaded ${events.length} cached event(s) from ${CONFIG.calendarListName}`);
+  return events;
+}
+
+async function fetchCachedDataFirst() {
+  setMainLoadingMessage('Loading cached calendar data…');
+  setSubLoadingMessage('Reading SharePoint cache lists…');
+  setLoading('Reading SharePoint cache…', true);
+  try {
+    await fetchWonProjectsCache();
+    const cachedEvents = await fetchCalendarCacheFromSharePoint();
+
+    // Vehicle assignment from cache is included if the list has Vehicle field,
+    // otherwise it will be added by the background refresh.
+    cachedEvents.forEach(e => enrichEventFromLookup(e, projectLookup));
+
+    const weekKey = getWeekKey(currentWeekStart);
+    _loadedWeekEvents[weekKey] = cachedEvents;
+    allEvents = Object.values(_loadedWeekEvents).flat();
+    _eventsCacheReady = true;
+    return cachedEvents;
+  } finally {
+    setLoading('Reading SharePoint cache…', false);
+  }
+}
+
+function cacheFieldValue(v) {
+  return v == null ? '' : String(v);
+}
+
+async function upsertCalendarCacheItems(events) {
+  // Best-effort cache refresh into StaffCalendarCache.
+  // Expected columns:
+  // Title, StaffName, StaffEmail, EventDate, EventEnd, ProjectNumber, EventType,
+  // Town, County, Latitude, Longitude, OutlookEventId, LastSynced.
+  //
+  // This appends refreshed items. For a cleaner production version, use
+  // OutlookEventId as a stable unique key and update/delete existing rows.
+  try {
+    const listId = await getListId(CONFIG.calendarListName);
+    const limited = (events || []).filter(e => e && e.date && eventFallsInCurrentWeek(e));
+    const now = new Date().toISOString();
+
+    for (const e of limited) {
+      const fields = {
+        Title: cacheFieldValue(e.title || `${e.person || ''} ${e.date || ''}`),
+        StaffName: cacheFieldValue(e.person),
+        StaffEmail: cacheFieldValue(e.staffEmail || e.email || ''),
+        EventDate: cacheFieldValue(e.startISO || e.date),
+        EventEnd: cacheFieldValue(e.endISO || e.date),
+        ProjectNumber: cacheFieldValue(e.projectNo),
+        EventType: cacheFieldValue(e.type),
+        Town: cacheFieldValue(e.town),
+        County: cacheFieldValue(e.county),
+        Latitude: Number.isFinite(Number(e.lat)) ? Number(e.lat) : null,
+        Longitude: Number.isFinite(Number(e.lng)) ? Number(e.lng) : null,
+        OutlookEventId: cacheFieldValue(e.outlookEventId || e.id || ''),
+        LastSynced: now,
+      };
+
+      try {
+        await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
+      } catch (inner) {
+        console.warn('Could not write StaffCalendarCache item; check list columns:', inner.message, fields);
+      }
+    }
+  } catch (e) {
+    console.warn('StaffCalendarCache update skipped:', e.message);
+  }
+}
+
+async function upsertWonProjectsCacheItems(events) {
+  try {
+    const listId = await getListId(CONFIG.projectLocationCacheListName);
+    const seen = new Set();
+    for (const e of (events || [])) {
+      if (!e || !e.projectNo || seen.has(e.projectNo)) continue;
+      seen.add(e.projectNo);
+      const loc = projectLookup[e.projectNo];
+      if (!loc) continue;
+      const fields = {
+        Title: cacheFieldValue(loc.site || e.title || e.projectNo),
+        ProjectNumber: cacheFieldValue(e.projectNo),
+        Site: cacheFieldValue(loc.site),
+        Town: cacheFieldValue(loc.town),
+        County: cacheFieldValue(loc.county),
+        Postcode: cacheFieldValue(loc.postcode),
+        Latitude: loc.lat == null ? null : Number(loc.lat),
+        Longitude: loc.lng == null ? null : Number(loc.lng),
+      };
+      try {
+        await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
+      } catch (inner) {
+        console.warn('Could not write project location cache item; check list columns:', inner.message, fields);
+      }
+    }
+  } catch (e) {
+    console.warn('Project location cache update skipped:', e.message);
+  }
+}
+
+async function refreshFromLiveSourcesInBackground() {
+  setSubLoadingMessage('Refreshing live Outlook/workbook data in background…');
+  setLoading('Refreshing live data in background…', true);
+  try {
+    const freshEvents = await fetchAllStaffCalendars(true);
+    await ensureProjectLookupForEvents(freshEvents);
+    freshEvents.forEach(e => enrichEventFromLookup(e, projectLookup));
+
+    const weekKey = getWeekKey(currentWeekStart);
+    _loadedWeekEvents[weekKey] = freshEvents.filter(e => eventFallsInCurrentWeek(e));
+    allEvents = Object.values(_loadedWeekEvents).flat();
+
+    buildStaffFilter();
+    renderAll();
+
+    // Update cache lists after the live render. These writes are best-effort.
+    upsertCalendarCacheItems(_loadedWeekEvents[weekKey]);
+    upsertWonProjectsCacheItems(_loadedWeekEvents[weekKey]);
+
+    if (CONFIG.backgroundRefreshMessage) showNotification('Live calendar data refreshed', 'ok');
+  } catch (e) {
+    console.warn('Live background refresh failed:', e);
+    showNotification('Cached data loaded, but live refresh failed', 'error');
+  } finally {
+    setLoading('Refreshing live data in background…', false);
+    clearSubLoadingMessage();
+  }
+}
+
 async function fetchSharePointData() {
-  // Function name kept for backward compatibility — actually reads staff calendars
-  // directly from Graph and resolves only the current week's locations.
-  return await fetchAllStaffCalendars();
+  // Cache-first: return SharePoint list data immediately where available.
+  // Then refresh Outlook/workbook in the background and re-render.
+  if (CONFIG.cacheFirstLoad) {
+    try {
+      const cached = await fetchCachedDataFirst();
+      if (cached && cached.length) {
+        setTimeout(() => refreshFromLiveSourcesInBackground(), 50);
+        return allEvents;
+      }
+    } catch (e) {
+      console.warn('Cache-first load failed; falling back to live calendar fetch:', e.message);
+    }
+  }
+
+  const live = await fetchAllStaffCalendars();
+  setTimeout(() => refreshFromLiveSourcesInBackground(), 50);
+  return live;
 }
 
 async function refreshCalendars() {
@@ -2470,35 +2591,42 @@ async function refreshCalendars() {
   _loadedWeekEvents = {};
   _vehicleBookingsByWeek = {};
   projectLookup = {};
-  _workbookRowsCache = null;
-  _workbookLoading = null;
-  _projectWorkbookFileRef = null;
-  _backgroundWarmupStarted = false;
-  _backgroundWarmupCancel++;
   await loadData();
   showNotification('Calendars refreshed', 'ok');
 }
 
 function mapEventItem(item, lookup) {
   const f = item.fields || {};
-  const proj = (f.ProjectNumber || extractProjectNo(f.Title) || '').toString();
+  const proj = normaliseProjectNo(f.ProjectNumber || extractProjectNo(f.Title) || '');
   const enriched = (proj && lookup[proj]) ? lookup[proj] : null;
+
+  const lat = f.Latitude != null && f.Latitude !== ''
+    ? Number(f.Latitude)
+    : (enriched && enriched.lat != null ? Number(enriched.lat) : NaN);
+
+  const lng = f.Longitude != null && f.Longitude !== ''
+    ? Number(f.Longitude)
+    : (enriched && enriched.lng != null ? Number(enriched.lng) : NaN);
+
   return {
-    id:        item.id,
-    person:    f.StaffName,
-    date:      f.EventDate ? f.EventDate.split('T')[0] : '',
+    id:        f.OutlookEventId || item.id,
+    person:    f.StaffName || '',
+    staffEmail:f.StaffEmail || '',
+    date:      f.EventDate ? String(f.EventDate).split('T')[0] : '',
     startISO:  f.EventDate || '',
     endISO:    f.EventEnd || '',
     projectNo: proj,
-    title:     f.Title,
-    site:      enriched ? enriched.site   : '',
-    town:      enriched ? enriched.town   : '',
-    county:    enriched ? enriched.county : '',
+    title:     f.Title || '',
+    site:      enriched ? enriched.site : (f.Title || ''),
+    town:      f.Town || (enriched ? enriched.town : ''),
+    county:    f.County || (enriched ? enriched.county : ''),
     postcode:  enriched ? enriched.postcode : '',
-    lat:       enriched && enriched.lat != null ? Number(enriched.lat) : NaN,
-    lng:       enriched && enriched.lng != null ? Number(enriched.lng) : NaN,
-    type:      f.EventType || 'Survey',
-    vehicle:   '',
+    lat,
+    lng,
+    type:      f.EventType || 'Field survey',
+    vehicle:   f.Vehicle || '',
+    outlookEventId: f.OutlookEventId || '',
+    lastSynced: f.LastSynced || '',
     _projInLookup:    !!enriched,
     _hasPostcode:     !!(enriched && enriched.postcode),
     _hasValidPostcode: !!(enriched && isValidPostcode(enriched.postcode)),
