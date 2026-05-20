@@ -1027,11 +1027,11 @@
   /* ── LOADING OVERLAY ── */
   .loading-overlay {
     position: fixed;
-    left: 12px;
+    left: 352px; /* 340px sidebar + 12px padding: places card over map, not sidebar */
     bottom: 52px;
     top: auto;
     right: auto;
-    width: min(420px, calc(100vw - 24px));
+    width: min(420px, calc(100vw - 364px));
     background: rgba(255,255,255,0.96);
     border: 1px solid var(--rule);
     border-left: 3px solid var(--sage);
@@ -1104,7 +1104,7 @@
   /* Small persistent loading badge */
   .loading-badge {
     position: fixed;
-    left: 12px;
+    left: 352px; /* 340px sidebar + 12px padding: places badge over map, not sidebar */
     bottom: 12px;
     z-index: 9998;
     background: rgba(255, 255, 255, 0.96);
@@ -1120,25 +1120,11 @@
     gap: 0.5rem;
     box-shadow: 0 2px 12px rgba(0,0,0,0.10);
     pointer-events: none;
-    width: min(420px, calc(100vw - 24px));
+    width: min(420px, calc(100vw - 364px));
   }
   .loading-badge.visible { display: inline-flex; }
 
-  @media (max-width: 600px) {
-    .loading-overlay {
-      left: 0.75rem;
-      right: 0.75rem;
-      bottom: 3.4rem;
-      width: auto;
-      justify-content: flex-start;
-    }
-    .loading-badge {
-      left: 0.75rem;
-      right: 0.75rem;
-      bottom: 0.75rem;
-      width: auto;
-    }
-  }
+
 
   .loading-badge::before {
     content: '';
@@ -1218,6 +1204,33 @@
     .map-search { left: 50px; right: 50px; transform: none; width: auto; max-width: none; top: 8px; }
     .map-search-input { font-size: 0.8rem; padding: 0.4rem 0.6rem; }
   }
+  @media (max-width: 900px) {
+    .loading-overlay {
+      left: 12px;
+      width: min(420px, calc(100vw - 24px));
+    }
+    .loading-badge {
+      left: 12px;
+      width: min(420px, calc(100vw - 24px));
+    }
+  }
+
+  @media (max-width: 600px) {
+    .loading-overlay {
+      left: 0.75rem;
+      right: 0.75rem;
+      bottom: 3.4rem;
+      width: auto;
+      justify-content: flex-start;
+    }
+    .loading-badge {
+      left: 0.75rem;
+      right: 0.75rem;
+      bottom: 0.75rem;
+      width: auto;
+    }
+  }
+
 </style>
 </head>
 <body>
@@ -1438,6 +1451,12 @@ const CONFIG = {
   colTown:          4,  // E
   colCounty:        5,  // F
   colPostcode:      6,  // G — new column
+
+  // Performance tuning
+  projectLookupMaxRows: 6000,        // only read A:G for initial/project lookups, not the full usedRange
+  backgroundWarmPastWeeks: 1,        // preload one week back
+  backgroundWarmFutureWeeks: 8,      // preload eight weeks ahead
+  backgroundWarmDelayMs: 750,        // let the first render settle before background work
 
   // Set to true when running against the real Graph API
   useLiveData: true,
@@ -1830,16 +1849,6 @@ function buildStaffFilter() {
   const container = document.getElementById('staffFilter');
   container.innerHTML = '';
 
-  // Important: show the full staff list. The previous version only showed staff
-  // with events in the current week, then overwrote activeStaff to that reduced
-  // set. That could hide valid site visits downstream in renderAll().
-  const visibleStaff = staffList.slice();
-
-  // First render: select everyone by default. After that, preserve user toggles.
-  if (activeStaff.size === 0 && visibleStaff.length > 0) {
-    activeStaff = new Set(visibleStaff.map(s => s.name));
-  }
-
   const ws = currentWeekStart;
   const we = getWeekEnd(ws);
   const onSiteThisWeek = new Set();
@@ -1848,14 +1857,24 @@ function buildStaffFilter() {
     if (d >= ws && d <= we && isSurveyType(e.type)) onSiteThisWeek.add(e.person);
   });
 
+  // Ribbon chips show only staff who are on site this week.
+  // Calendar grid still uses the full staffList in renderGrid().
+  const visibleStaff = staffList.filter(s => onSiteThisWeek.has(s.name));
+
+  // First render: select everyone by default so events are not hidden before the
+  // user applies a chip filter. Do not shrink this to visibleStaff only.
+  if (activeStaff.size === 0 && staffList.length > 0) {
+    activeStaff = new Set(staffList.map(s => s.name));
+  }
+
   visibleStaff.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'staff-chip' + (activeStaff.has(s.name) ? ' active' : '');
     chip.textContent = shortName(s.name);
-    chip.title = onSiteThisWeek.has(s.name) ? `${s.name} — has site visit this week` : s.name;
+    chip.title = `${s.name} — has site visit this week`;
     chip.style.borderColor = s.color;
     chip.style.color = s.color;
-    chip.style.opacity = onSiteThisWeek.has(s.name) ? '1' : '0.55';
+    chip.style.opacity = '1';
     chip.style.backgroundColor = activeStaff.has(s.name) ? s.color + '22' : 'transparent';
     chip.dataset.name = s.name;
     chip.addEventListener('click', () => toggleStaff(s.name, chip, s.color));
@@ -1865,22 +1884,33 @@ function buildStaffFilter() {
   if (visibleStaff.length === 0) {
     const note = document.createElement('div');
     note.style.cssText = "font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--text-secondary);";
-    note.textContent = 'No staff loaded';
+    note.textContent = 'No site visits this week';
     container.appendChild(note);
     return;
   }
 
-  // "All" toggle — selects all if anyone is deselected, otherwise clears all
+  // "All" toggle applies to the ribbon staff only, leaving non-site staff unaffected.
   const allBtn = document.createElement('div');
   allBtn.className = 'staff-chip';
   allBtn.id = 'allStaffBtn';
+  allBtn.textContent = 'All';
+  allBtn.title = 'Toggle all staff with site visits this week';
   allBtn.style.borderColor = '#999';
-  allBtn.style.color = '#999';
-  allBtn.style.marginLeft = '0.25rem';
-  allBtn.addEventListener('click', toggleAllStaff);
+  allBtn.style.color = '#666';
+  allBtn.addEventListener('click', () => {
+    const visibleNames = visibleStaff.map(s => s.name);
+    const allVisibleSelected = visibleNames.every(n => activeStaff.has(n));
+    if (allVisibleSelected) {
+      visibleNames.forEach(n => activeStaff.delete(n));
+    } else {
+      visibleNames.forEach(n => activeStaff.add(n));
+    }
+    buildStaffFilter();
+    renderAll();
+  });
   container.appendChild(allBtn);
-  updateAllBtnLabel();
 }
+
 
 function updateAllBtnLabel() {
   const btn = document.getElementById('allStaffBtn');
@@ -1984,7 +2014,81 @@ async function resolveCurrentWeekLocationsInBackground(events) {
   } finally {
     setLoading(`Resolving current week locations: ${needed.length} project(s)…`, false);
     clearSubLoadingMessage();
+
+    // After the current week is usable, quietly preload other weeks and their
+    // locations so later week switching is much faster.
+    warmCalendarsAndLocationsInBackground();
   }
+}
+
+
+function addWeeks(date, weeks) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + (weeks * 7));
+  return getWeekStart(d);
+}
+
+async function fetchWeekCalendarsAndVehicles(weekStart, forceRefresh = false) {
+  const originalWeekStart = currentWeekStart;
+  currentWeekStart = getWeekStart(weekStart);
+  try {
+    return await fetchAllStaffCalendars(forceRefresh);
+  } finally {
+    currentWeekStart = originalWeekStart;
+  }
+}
+
+async function warmCalendarsAndLocationsInBackground() {
+  if (_backgroundWarmupStarted) return;
+  _backgroundWarmupStarted = true;
+  const warmupId = ++_backgroundWarmupCancel;
+
+  await new Promise(r => setTimeout(r, Number(CONFIG.backgroundWarmDelayMs || 750)));
+
+  const baseWeek = getWeekStart(new Date());
+  const weeks = [];
+  const past = Number(CONFIG.backgroundWarmPastWeeks || 0);
+  const future = Number(CONFIG.backgroundWarmFutureWeeks || 0);
+
+  for (let i = -past; i <= future; i++) {
+    const wk = addWeeks(baseWeek, i);
+    if (getWeekKey(wk) !== getWeekKey(currentWeekStart)) weeks.push(wk);
+  }
+
+  for (let i = 0; i < weeks.length; i++) {
+    if (warmupId !== _backgroundWarmupCancel) return;
+    const wk = weeks[i];
+    const label = wk.toLocaleDateString('en-GB', { day:'2-digit', month:'short' });
+
+    try {
+      setMainLoadingMessage('Loading calendar data…');
+      setSubLoadingMessage(`Background preload ${i + 1}/${weeks.length}: week from ${label}`);
+      setLoading(`Background preload: week from ${label}`, true);
+
+      const beforeKey = getWeekKey(currentWeekStart);
+      const events = await fetchWeekCalendarsAndVehicles(wk, false);
+      const wkEnd = getWeekEnd(wk);
+      const weekEvents = events.filter(e => {
+        const d = new Date(e.date);
+        return d >= wk && d <= wkEnd;
+      });
+
+      await ensureProjectLookupForEvents(weekEvents);
+
+      // Re-render only if the user is still viewing the week that was current
+      // when this background pass started. Otherwise avoid jumping the UI.
+      if (getWeekKey(currentWeekStart) === beforeKey) {
+        renderAll();
+      }
+    } catch (e) {
+      console.warn('Background preload failed for week', wk, e);
+    } finally {
+      setLoading(`Background preload: week from ${label}`, false);
+    }
+  }
+
+  clearSubLoadingMessage();
+  showNotification('Background calendar/location preload complete', 'ok');
 }
 
 async function refreshData() {
@@ -2005,10 +2109,15 @@ let projectLookup = {};      // { '1234': { site, town, county, postcode, lat, l
 let _workbookRowsCache = null;
 let _workbookLoading = null;
 
+let _projectWorkbookFileRef = null;  // { driveId, fileId }
+let _backgroundWarmupStarted = false;
+let _backgroundWarmupCancel = 0;
+
+
 function normaliseProjectNo(v) {
   let num = ('' + (v || '')).trim();
   if (/^\d+\.0$/.test(num)) num = num.slice(0, -2);
-  const m = num.match(/\b(\d{4,6})\b/);
+  const m = num.match(/\b0?(\d{4})\b/);
   return m ? m[1] : num;
 }
 
@@ -2029,30 +2138,50 @@ async function saveProjectLocationsToCache(locations) {
 }
 
 
+async function getProjectWorkbookFileRef() {
+  if (_projectWorkbookFileRef) return _projectWorkbookFileRef;
+
+  const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
+  if (!site) return null;
+
+  const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
+  const drives = drivesRes.value || [];
+
+  for (const d of drives) {
+    try {
+      const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
+      const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
+      if (match) {
+        _projectWorkbookFileRef = { driveId: d.id, fileId: match.id };
+        return _projectWorkbookFileRef;
+      }
+    } catch(e) {
+      console.warn(`Search in drive "${d.name}" failed`, e);
+    }
+  }
+
+  showNotification('Won Projects workbook not found on Data site', 'error');
+  return null;
+}
+
 async function loadWorkbookRowsOnce() {
+  // Load only the columns used for project lookups, rather than the workbook's
+  // full usedRange. The app needs A, D, E, F and G, so A:G is enough.
   if (_workbookRowsCache) return _workbookRowsCache;
   if (_workbookLoading) return _workbookLoading;
+
   _workbookLoading = (async () => {
-    setLoading('Checking Won Projects workbook…', true);
+    setLoading('Checking Won Projects workbook columns A:G…', true);
     try {
-      const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
-      if (!site) return [];
-      const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
-      const drives = drivesRes.value || [];
-      let file = null, driveId = null;
-      for (const d of drives) {
-        try {
-          const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
-          const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
-          if (match) { file = match; driveId = d.id; break; }
-        } catch(e) { console.warn(`Search in drive "${d.name}" failed`, e); }
-      }
-      if (!file) {
-        showNotification('Won Projects workbook not found on Data site', 'error');
-        return [];
-      }
+      const ref = await getProjectWorkbookFileRef();
+      if (!ref) return [];
+
       const sheet = encodeURIComponent(CONFIG.workbookSheet);
-      const range = await graphFetch(`/drives/${driveId}/items/${file.id}/workbook/worksheets('${sheet}')/usedRange(valuesOnly=true)`);
+      const maxRows = Number(CONFIG.projectLookupMaxRows || 6000);
+      const address = `A1:G${maxRows}`;
+
+      setSubLoadingMessage(`Reading Won Projects ${address}…`);
+      const range = await graphFetch(`/drives/${ref.driveId}/items/${ref.fileId}/workbook/worksheets('${sheet}')/range(address='${address}')`);
       _workbookRowsCache = range.values || [];
       return _workbookRowsCache;
     } catch(e) {
@@ -2060,18 +2189,20 @@ async function loadWorkbookRowsOnce() {
       showNotification('Could not load Won Projects workbook', 'error');
       return [];
     } finally {
-      setLoading('Checking Won Projects workbook…', false);
+      setLoading('Checking Won Projects workbook columns A:G…', false);
     }
   })();
+
   return _workbookLoading;
 }
+
 
 async function lookupMissingProjectsFromWorkbook(projectNos) {
   const needed = new Set((projectNos || []).map(normaliseProjectNo).filter(Boolean));
   const out = {};
   if (!needed.size) return out;
 
-  setSubLoadingMessage(`Checking Won Projects workbook for ${needed.size} current-week project(s)…`);
+  setSubLoadingMessage(`Checking Won Projects workbook for ${needed.size} project(s)…`);
   const rows = await loadWorkbookRowsOnce();
   const postcodes = new Set();
   for (let i = 1; i < rows.length; i++) {
@@ -2339,6 +2470,11 @@ async function refreshCalendars() {
   _loadedWeekEvents = {};
   _vehicleBookingsByWeek = {};
   projectLookup = {};
+  _workbookRowsCache = null;
+  _workbookLoading = null;
+  _projectWorkbookFileRef = null;
+  _backgroundWarmupStarted = false;
+  _backgroundWarmupCancel++;
   await loadData();
   showNotification('Calendars refreshed', 'ok');
 }
@@ -2371,7 +2507,9 @@ function mapEventItem(item, lookup) {
 
 // Extract 4-digit project number from a string
 function extractProjectNo(str) {
-  const m = (str || '').match(/\b(\d{4})\b/);
+  // Accept normal 4-digit project codes, plus 5-digit codes with a leading zero.
+  // Example: "09563" is treated as "9563".
+  const m = (str || '').match(/\b0?(\d{4})\b/);
   return m ? m[1] : null;
 }
 
@@ -2391,12 +2529,13 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
       const vehicleFromCategory = extractVehicleName(ev.categories || []);
-      const fallbackVehicle = (subject.split(/\s+/)[0] || '').replace(/[^\w-]/g, '');
       return {
-        title:   subject,
-        vehicle: vehicleFromCategory || fallbackVehicle,
-        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
-        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
+        title:     subject,
+        vehicle:   vehicleFromCategory, // no fallback: if the vehicle category is missing, leave blank
+        projectNo: extractProjectNo(subject),
+        initials:  extractInitialsTokens(subject),
+        start:     ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:       ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
     _vehicleBookingsByWeek[weekKey] = bookings;
@@ -2409,1259 +2548,98 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
 }
 
 // Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
-function initialsForName(name) {
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
-  const first = parts[0][0].toUpperCase();
-  const last = parts[parts.length - 1];
-  const short = first + last[0].toUpperCase();          // CF
-  const long  = first + last.substring(0, 2).toUpperCase(); // CFA
-  return [short, long];
+
+function extractInitialsTokens(str) {
+  // Finds likely staff initials in vehicle booking subjects, e.g. HF, TC, PL.
+  // Avoids treating 4/5 digit project numbers as initials.
+  const tokens = (str || '').toUpperCase().match(/\b[A-Z]{2,4}\b/g) || [];
+  return new Set(tokens);
 }
 
-function attachVehicles(events, bookings) {
-  if (!bookings || !bookings.length) return;
-  events.forEach(e => {
-    if (!isSurveyType(e.type)) return;
-    const eventDate = new Date(e.date);
-    if (isNaN(eventDate)) return;
-    const initials = initialsForName(e.person);
-    const dayMs = 86400000;
-    const evDayStart = new Date(eventDate); evDayStart.setHours(0,0,0,0);
-    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23,59,59,999);
-    const matchable = bookings.filter(b =>
-      (b.end.getTime() + dayMs) >= evDayStart.getTime() &&
-      (b.start.getTime() - dayMs) <= evDayEnd.getTime()
+function eventDayRange(event) {
+  const d = new Date(event.date);
+  const start = new Date(d);
+  start.setHours(0,0,0,0);
+  const end = new Date(d);
+  end.setHours(23,59,59,999);
+  return { start, end };
+}
+
+function bookingOverlapsEventDay(booking, event) {
+  const r = eventDayRange(event);
+  return booking.start <= r.end && booking.end >= r.start;
+}
+
+function vehicleBookingMatchesEvent(booking, event, staff) {
+  if (!booking || !event || !staff) return false;
+  if (!bookingOverlapsEventDay(booking, event)) return false;
+
+  const eventProject = event.projectNo || extractProjectNo(event.title || '');
+  const bookingProject = booking.projectNo || extractProjectNo(booking.title || '');
+
+  // Strongest match: project number matches.
+  if (eventProject && bookingProject && eventProject === bookingProject) return true;
+
+  // Preferred fallback: staff initials are explicitly included in the vehicle booking.
+  const possibleInitials = initialsForName(staff.name || event.person || '');
+  if (booking.initials && possibleInitials.some(i => booking.initials.has(i.toUpperCase()))) return true;
+
+  // Do not assign a default vehicle just because there is a booking on the same day.
+  return false;
+}
+
+function attachVehicles(events, vehicles) {
+  assignVehiclesToSiteVisits(events, vehicles);
+}
+
+function assignVehiclesToSiteVisits(events, bookings) {
+  if (!Array.isArray(events) || !Array.isArray(bookings) || bookings.length === 0) return;
+
+  const staffByName = new Map(staffList.map(s => [s.name, s]));
+
+  // Group staff events by project/date. One matched vehicle should be shared across
+  // everyone going to the same project on the same day, rather than duplicated by
+  // running a loose same-day match for each person.
+  const groups = new Map();
+  events.filter(e => e && isSurveyType(e.type)).forEach(e => {
+    e.vehicle = '';
+    const key = `${e.date}|${e.projectNo || extractProjectNo(e.title || '') || e.title || ''}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  });
+
+  groups.forEach(group => {
+    const projectNo = group[0].projectNo || extractProjectNo(group[0].title || '');
+
+    let candidates = bookings.filter(b =>
+      b.vehicle &&
+      group.some(e => bookingOverlapsEventDay(b, e))
     );
-    if (!matchable.length) return;
-    const initialMatch = matchable.find(b => {
-      const upper = b.title.toUpperCase();
-      return initials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
-    });
-    e.vehicle = (initialMatch || matchable[0]).vehicle;
-  });
-}
 
-// ═══════════════════════════════════════════════════════════
-// RENDERING
-// ═══════════════════════════════════════════════════════════
-let surveyEvents = [];   // map/sidebar/table see these only
-function isSurveyType(t) {
-  return t === 'Field survey' || t === 'Field survey (out of hours)' || t === 'Survey';
-}
-
-function renderAll() {
-  buildDayFilter();
-  const ws = currentWeekStart;
-  const we = getWeekEnd(ws);
-  const validStaff = new Set(staffList.map(s => s.name));
-  filteredEvents = allEvents.filter(e => {
-    const d = new Date(e.date);
-    if (!(d >= ws && d <= we)) return false;
-    if (!activeStaff.has(e.person) || !validStaff.has(e.person)) return false;
-    if (dayFilter && e.date !== dayFilter) return false;
-    return true;
-  });
-  surveyEvents = filteredEvents.filter(e => isSurveyType(e.type));
-  updateStats();
-  renderSidebar();
-  renderMap();
-  renderTable();
-  if (currentView === 'grid') renderGrid();
-}
-
-function buildDayFilter() {
-  const container = document.getElementById('dayFilter');
-  if (!container) return;
-  const ws = currentWeekStart;
-  let html = `<button class="day-filter-chip ${!dayFilter ? 'active' : ''}" onclick="setDayFilter(null)">All</button>`;
-  const todayISO = fmtDateLocal(new Date());
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(ws);
-    d.setDate(d.getDate() + i);
-    const iso = fmtDateLocal(d);
-    const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
-    const day = d.getDate();
-    const isActive = dayFilter === iso;
-    const isToday = iso === todayISO;
-    html += `<button class="day-filter-chip ${isActive ? 'active' : ''}" title="${dow} ${day}" onclick="setDayFilter('${iso}')">${dow}<br><span style="font-size:0.65rem">${day}${isToday ? '•' : ''}</span></button>`;
-  }
-  container.innerHTML = html;
-}
-
-function setDayFilter(iso) {
-  dayFilter = iso;
-  renderAll();
-}
-
-function updateStats() {
-  const siteVisits = surveyEvents.length;
-  const staff = new Set(surveyEvents.map(e => e.person)).size;
-  const counties = new Set(surveyEvents.filter(e=>e.county).map(e => e.county)).size;
-  const projects = new Set(surveyEvents.filter(e=>e.projectNo).map(e => e.projectNo)).size;
-  document.getElementById('statEvents').textContent = siteVisits;
-  document.getElementById('statStaff').textContent = staff;
-  document.getElementById('statCounties').textContent = counties;
-  document.getElementById('statProjects').textContent = projects;
-  document.getElementById('eventCount').textContent = surveyEvents.length + ' visit' + (surveyEvents.length!==1?'s':'');
-}
-
-function renderSidebar() {
-  const container = document.getElementById('sidebarScroll');
-  if (!surveyEvents.length) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><p>No site visits this week</p></div>';
-    return;
-  }
-  const grouped = groupByDate(surveyEvents);
-  const today = new Date().toISOString().split('T')[0];
-  let html = '';
-  grouped.forEach((events, date) => {
-    const isToday = date === today;
-    const label = formatDateLabel(date);
-    html += `<div class="day-group">
-      <div class="day-group-header ${isToday?'today':''}">${label}${isToday?' — Today':''}</div>`;
-    events.forEach(e => {
-      const color = staffColor(e.person);
-      const locTag = e.town ? `<span class="location-tag">◎ ${e.town}${e.county?', '+e.county:''}</span>` : '';
-      const projBadge = e.projectNo ? `<span class="proj-badge">${e.projectNo}</span>` : '';
-      const vehTag = e.vehicle ? `<span class="vehicle-tag">🚗 ${escapeHtml(e.vehicle)}</span>` : '';
-      const noGeo = (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng));
-      let warnTag = '';
-      if (noGeo) {
-        let reason = 'No coordinates';
-        if (!e.projectNo) {
-          reason = 'No 4-digit site code in calendar entry';
-        } else if (!e._projInLookup) {
-          reason = `Project ${e.projectNo} not found in Won Projects`;
-        } else if (!e._hasPostcode) {
-          reason = `Project ${e.projectNo} has no Nearest postcode in workbook`;
-        } else if (!e._hasValidPostcode) {
-          reason = `Project ${e.projectNo} postcode '${e.postcode}' not valid`;
-        } else {
-          reason = `Project ${e.projectNo} postcode '${e.postcode}' could not be geocoded`;
-        }
-        warnTag = `<span class="warn-tag" title="${reason}">⚠ ${reason}</span>`;
+    // Prefer project-code matches first.
+    if (projectNo) {
+      const projectMatches = candidates.filter(b => b.projectNo === projectNo);
+      if (projectMatches.length === 1) {
+        group.forEach(e => { e.vehicle = projectMatches[0].vehicle; });
+        return;
       }
-      html += `<div class="event-card${noGeo?' nogeo':''}" data-id="${e.id}" onclick="focusEvent('${e.id}')">
-        <div class="event-dot" style="background:${color}"></div>
-        <div class="event-body">
-          <div class="event-person" style="color:${color}">${e.person}</div>
-          <div class="event-title">${e.title}</div>
-          <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>
-              ${e.vehicle ? `<span class="vehicle-tag">🚙 ${e.vehicle}</span>` : ''}${vehTag}${warnTag}</div>
-        </div>
-      </div>`;
-    });
-    html += '</div>';
-  });
-  container.innerHTML = html;
-}
-
-function renderMap() {
-  markerLayer.clearLayers();
-  routeLayer.clearLayers();
-  // Group survey events by location:
-  // - by project number when present (collapses same project across attendees/days)
-  // - else by rounded lat/lng (~100m tolerance)
-  const locations = {};
-  surveyEvents.forEach(e => {
-    if (!e.lat || !e.lng) return;
-    const key = e.projectNo
-      ? `proj-${String(e.projectNo).trim()}`
-      : `${e.lat.toFixed(3)},${e.lng.toFixed(3)}`;
-    if (!locations[key]) locations[key] = { lat: e.lat, lng: e.lng, events: [] };
-    locations[key].events.push(e);
-  });
-
-  Object.values(locations).forEach(loc => {
-    const events = loc.events;
-    const persons = [...new Set(events.map(e => e.person))];
-    const multiPerson = persons.length > 1;
-    // Pick a single colour: first person's, or a neutral dark green for multi-person
-    const baseColor = persons.length === 1 ? staffColor(persons[0]) : '#3b6b2d';
-
-    // Build marker SVG — one solid dot, with a small count badge if multi-person
-    const size = 26;
-    const dot = `<circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${baseColor}" stroke="white" stroke-width="2"/>`;
-    const badge = multiPerson
-      ? `<circle cx="${size - 6}" cy="6" r="6" fill="white" stroke="${baseColor}" stroke-width="1.5"/>
-         <text x="${size - 6}" y="9" text-anchor="middle" font-family="DM Mono, monospace" font-size="8" font-weight="700" fill="${baseColor}">${persons.length}</text>`
-      : '';
-
-    const svgIcon = L.divIcon({
-      html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${dot}${badge}</svg>`,
-      className: '',
-      iconSize: [size, size],
-      iconAnchor: [size/2, size/2],
-    });
-
-    // Label: staff (short) + dates + town + vehicle
-    const labelStaff = persons.length === 1 ? shortName(persons[0])
-                    : persons.length === 2 ? persons.map(shortName).join(' & ')
-                    : `${shortName(persons[0])} +${persons.length - 1}`;
-    const dates = [...new Set(events.map(e => e.date))].sort();
-    const dateRange = formatDateRange(dates);
-    const uniqueVehicles = [...new Set(events.map(e => e.vehicle).filter(Boolean))];
-    const vehicleText = uniqueVehicles.length ? ' · 🚗 ' + uniqueVehicles.join('/') : '';
-    const labelText = `${labelStaff} · ${dateRange}` + (events[0].town ? ' · ' + events[0].town : '') + vehicleText;
-
-    const popupContent = buildPopup(loc, persons);
-    const marker = L.marker([loc.lat, loc.lng], { icon: svgIcon })
-      .bindPopup(popupContent, { maxWidth: 320 })
-      .bindTooltip(labelText, {
-        permanent: true,
-        direction: 'right',
-        offset: [size/2 + 2, 0],
-        className: 'map-label',
-      });
-    markerLayer.addLayer(marker);
-  });
-
-  // Fit bounds only on first render (or when user clicks "Reset view");
-  // preserve user zoom/pan on subsequent renders.
-  const latlngs = Object.values(locations).map(l => [l.lat, l.lng]);
-  if (!mapInitialised) {
-    if (latlngs.length > 1) {
-      map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 12 });
-    } else if (latlngs.length === 1) {
-      map.setView(latlngs[0], 10);
+      if (projectMatches.length > 1) candidates = projectMatches;
     }
-    mapInitialised = true;
-  }
 
-  if (showRoutes) renderRoutes();
-}
+    // Then use explicit staff initials. If a single vehicle booking references any
+    // member of the group, assign that vehicle to the group.
+    const initialsMatches = candidates.filter(b => group.some(e => {
+      const staff = staffByName.get(e.person) || { name: e.person };
+      return vehicleBookingMatchesEvent(b, e, staff);
+    }));
 
-// ── Office origin ──────────────────────────────────────────
-const OFFICE = { lat: 51.22585379648861, lng: -2.8520737323545187, name: 'Office' };
-const _routeCache = {};
-
-async function renderRoutes() {
-  // Group survey events by (person, date), only those with coords
-  const groups = {};
-  surveyEvents.forEach(e => {
-    if (!e.lat || !e.lng || isNaN(e.lat) || isNaN(e.lng)) return;
-    const k = `${e.person}|${e.date}`;
-    if (!groups[k]) groups[k] = { person: e.person, date: e.date, stops: [] };
-    groups[k].stops.push(e);
-  });
-
-  for (const k in groups) {
-    const g = groups[k];
-    // Sort stops chronologically by startISO
-    g.stops.sort((a, b) => (a.startISO || '').localeCompare(b.startISO || ''));
-    // Dedupe by lat/lng so we don't re-visit the same point
-    const unique = [];
-    const seen = new Set();
-    for (const s of g.stops) {
-      const key = `${s.lat.toFixed(4)},${s.lng.toFixed(4)}`;
-      if (!seen.has(key)) { seen.add(key); unique.push(s); }
+    const uniqueVehicles = [...new Set(initialsMatches.map(b => b.vehicle).filter(Boolean))];
+    if (uniqueVehicles.length === 1) {
+      group.forEach(e => { e.vehicle = uniqueVehicles[0]; });
     }
-    if (unique.length === 0) continue;
-
-    // Build full waypoint list: office -> stops -> office
-    const points = [
-      [OFFICE.lng, OFFICE.lat],
-      ...unique.map(s => [s.lng, s.lat]),
-      [OFFICE.lng, OFFICE.lat],
-    ];
-    drawRoute(g.person, points);
-  }
-}
-
-async function drawRoute(person, points) {
-  const cacheKey = JSON.stringify(points);
-  let coords;
-  if (_routeCache[cacheKey]) {
-    coords = _routeCache[cacheKey];
-  } else {
-    try {
-      const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
-      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`);
-      if (!res.ok) throw new Error('OSRM ' + res.status);
-      const data = await res.json();
-      if (!data.routes || !data.routes.length) return;
-      coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);  // [lat, lng]
-      _routeCache[cacheKey] = coords;
-    } catch(e) {
-      console.warn('Route fetch failed for', person, e);
-      // Fall back to straight line
-      coords = points.map(p => [p[1], p[0]]);
-    }
-  }
-  if (!showRoutes) return;   // user may have toggled off while waiting
-  const line = L.polyline(coords, {
-    color: staffColor(person),
-    weight: 3,
-    opacity: 0.55,
-    dashArray: '6, 4',
-  });
-  routeLayer.addLayer(line);
-}
-
-function toggleRoutes() {
-  showRoutes = !showRoutes;
-  if (showRoutes) renderRoutes();
-  else if (routeLayer) routeLayer.clearLayers();
-}
-
-function toggleSidebar() {
-  const sb = document.getElementById('sidebar');
-  const bd = document.getElementById('sidebarBackdrop');
-  const open = !sb.classList.contains('visible');
-  sb.classList.toggle('visible', open);
-  bd.classList.toggle('visible', open);
-  setTimeout(() => { if (map) map.invalidateSize(); }, 300);
-}
-
-// On phone: close drawer after the user picks an event
-function maybeCloseSidebar() {
-  if (window.innerWidth <= 900) {
-    document.getElementById('sidebar')?.classList.remove('visible');
-    document.getElementById('sidebarBackdrop')?.classList.remove('visible');
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// MANUAL POINTS
-// ═══════════════════════════════════════════════════════════
-let manualPoints = [];        // [{id, label, category, lat, lng, address, notes}]
-let categories = [];          // [{id, name, color, icon}]
-let activeCategories = new Set();   // names of categories currently shown
-let pointsLayer = null;
-let pointsPanelOpen = false;
-let addPointMode = false;
-let editingPointId = null;
-let editingCatId = null;
-let pendingCoords = null;     // when user clicks on map
-
-async function loadPointsAndCategories() {
-  if (!CONFIG.useLiveData) return;
-  try {
-    const [catListId, ptListId] = await Promise.all([
-      getListId(CONFIG.categoriesListName),
-      getListId(CONFIG.pointsListName),
-    ]);
-    const [catData, ptData] = await Promise.all([
-      graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${catListId}/items?$expand=fields&$top=200`),
-      graphFetch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${ptListId}/items?$expand=fields&$top=999`),
-    ]);
-    categories = (catData?.value || []).map(it => ({
-      id:    it.id,
-      name:  it.fields?.Title || '',
-      color: it.fields?.Color || '#7f8c8d',
-      icon:  it.fields?.Icon || '•',
-    })).filter(c => c.name);
-    // Default: all categories OFF. Preserve any user toggles from earlier in this session.
-    if (activeCategories.size > 0) {
-      // Keep only those that still exist
-      const valid = new Set(categories.map(c => c.name));
-      activeCategories = new Set([...activeCategories].filter(n => valid.has(n)));
-    }
-    // (If activeCategories is still empty, that's fine — nothing visible by default.)
-    manualPoints = (ptData?.value || []).map(it => {
-      const f = it.fields || {};
-      return {
-        id:       it.id,
-        label:    f.Title || '',
-        category: f.Category || '',
-        lat:      parseFloat(f.Latitude),
-        lng:      parseFloat(f.Longitude),
-        address:  f.Address || '',
-        notes:    f.Notes || '',
-        sortOrder: f.SortOrder != null && f.SortOrder !== '' ? parseFloat(f.SortOrder) : 1000 + parseFloat(it.id || 0),
-      };
-    }).filter(p => !isNaN(p.lat) && !isNaN(p.lng));
-    // Sort by SortOrder then label for tie-breaking
-    manualPoints.sort((a, b) => (a.sortOrder - b.sortOrder) || a.label.localeCompare(b.label));
-    renderPointsList();
-    renderCategoriesList();
-    rebuildLayersControl();
-    renderPointsLayer();
-  } catch(e) {
-    console.error('Points/categories load failed', e);
-    showNotification('Could not load manual points', 'error');
-  }
-}
-
-function categoryByName(name) {
-  return categories.find(c => c.name === name) || { name, color: '#7f8c8d', icon: '•' };
-}
-
-function renderPointsLayer() {
-  if (!pointsLayer) pointsLayer = L.layerGroup().addTo(map);
-  pointsLayer.clearLayers();
-  manualPoints.forEach(p => {
-    if (!activeCategories.has(p.category)) return;
-    const cat = categoryByName(p.category);
-    const size = 20;
-    const html = `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${cat.color};
-      color:white;font-size:0.7rem;font-weight:600;display:flex;align-items:center;
-      justify-content:center;border:1.5px solid white;box-shadow:0 1px 2px rgba(0,0,0,0.25);">${cat.icon}</div>`;
-    const icon = L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
-    const popupHtml = `
-      <div style="font-family:'Instrument Sans',sans-serif">
-        <div style="font-weight:600;margin-bottom:0.3rem">${escapeHtml(p.label)}</div>
-        <div style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#666;margin-bottom:0.4rem">${escapeHtml(p.category)}</div>
-        ${p.address ? `<div style="font-size:0.78rem;margin-bottom:0.3rem">${escapeHtml(p.address)}</div>` : ''}
-        ${p.notes ? `<div style="font-size:0.78rem;color:#444;border-top:1px solid #eee;padding-top:0.3rem;margin-top:0.3rem">${escapeHtml(p.notes)}</div>` : ''}
-        <div style="margin-top:0.5rem"><button class="link-btn" onclick="openEditPoint('${p.id}')">Edit</button></div>
-      </div>`;
-    const marker = L.marker([p.lat, p.lng], { icon })
-      .bindPopup(popupHtml, { maxWidth: 260 })
-      .bindTooltip(p.label, {
-        permanent: true, direction: 'right',
-        offset: [size/2 + 2, 0], className: 'point-label',
-      });
-    // Apply category color tint to label background after it's added
-    marker.on('add', () => {
-      const tip = marker.getTooltip();
-      if (tip && tip.getElement) {
-        const el = tip.getElement();
-        if (el) {
-          el.style.background = hexToRgba(cat.color, 0.18);
-          el.style.borderColor = hexToRgba(cat.color, 0.5);
-        }
-      }
-    });
-    pointsLayer.addLayer(marker);
+    // If ambiguous or no confident match, leave vehicle blank.
   });
 }
 
-function hexToRgba(hex, alpha) {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
 
-function escapeHtml(s) {
-  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function togglePointsPanel() {
-  pointsPanelOpen = !pointsPanelOpen;
-  document.getElementById('pointsPanel').classList.toggle('visible', pointsPanelOpen);
-  document.getElementById('pointsToggle').classList.toggle('active', pointsPanelOpen);
-  if (pointsPanelOpen && !manualPoints.length && !categories.length) {
-    loadPointsAndCategories();
-  }
-}
-
-function switchPointsTab(tab) {
-  document.querySelectorAll('.points-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.getElementById('pointsTabPoints').style.display = tab === 'points' ? '' : 'none';
-  document.getElementById('pointsTabCats').style.display   = tab === 'cats'   ? '' : 'none';
-}
-
-function renderPointsList() {
-  // Rebuild category filter dropdown options
-  const filter = document.getElementById('pointsCatFilter');
-  if (filter) {
-    const sel = filter.value;
-    filter.innerHTML = '<option value="">All categories</option>' +
-      categories.map(c => `<option value="${escapeHtml(c.name)}" ${c.name === sel ? 'selected' : ''}>${c.icon} ${escapeHtml(c.name)}</option>`).join('');
-  }
-  const filterVal = filter ? filter.value : '';
-
-  const c = document.getElementById('pointsList');
-  const points = filterVal ? manualPoints.filter(p => p.category === filterVal) : manualPoints;
-  if (!points.length) {
-    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No points to show.</div>';
-    return;
-  }
-  c.innerHTML = points.map((p, idx) => {
-    const cat = categoryByName(p.category);
-    const isFirst = idx === 0;
-    const isLast = idx === points.length - 1;
-    return `<div class="point-row">
-      <div class="point-arrows">
-        <button class="arrow-btn" ${isFirst ? 'disabled' : ''} onclick="event.stopPropagation();movePoint('${p.id}',-1)" title="Move up">▲</button>
-        <button class="arrow-btn" ${isLast ? 'disabled' : ''} onclick="event.stopPropagation();movePoint('${p.id}',1)" title="Move down">▼</button>
-      </div>
-      <div class="point-row-swatch" style="background:${cat.color}">${cat.icon}</div>
-      <div class="point-row-body" onclick="focusPoint('${p.id}')">
-        <div class="point-row-label">${escapeHtml(p.label)}</div>
-        <div class="point-row-cat">${escapeHtml(p.category)}</div>
-      </div>
-      <button class="link-btn" onclick="event.stopPropagation();openEditPoint('${p.id}')">Edit</button>
-    </div>`;
-  }).join('');
-}
-
-async function movePoint(id, direction) {
-  const filter = document.getElementById('pointsCatFilter');
-  const filterVal = filter ? filter.value : '';
-  const visible = filterVal ? manualPoints.filter(p => p.category === filterVal) : manualPoints;
-  const idx = visible.findIndex(p => p.id === id);
-  if (idx < 0) return;
-  const newIdx = idx + direction;
-  if (newIdx < 0 || newIdx >= visible.length) return;
-
-  // Swap sortOrder values of the two visible neighbours
-  const a = visible[idx];
-  const b = visible[newIdx];
-  const tmp = a.sortOrder;
-  a.sortOrder = b.sortOrder;
-  b.sortOrder = tmp;
-  // If they ended up equal (e.g. both defaults), nudge so order is stable
-  if (a.sortOrder === b.sortOrder) {
-    if (direction < 0) a.sortOrder -= 0.5;
-    else               a.sortOrder += 0.5;
-  }
-  // Persist both
-  try {
-    const listId = await getListId(CONFIG.pointsListName);
-    await Promise.all([
-      graphMutate('PATCH',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${a.id}/fields`,
-        { SortOrder: String(a.sortOrder) }),
-      graphMutate('PATCH',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${b.id}/fields`,
-        { SortOrder: String(b.sortOrder) }),
-    ]);
-    manualPoints.sort((x, y) => (x.sortOrder - y.sortOrder) || x.label.localeCompare(y.label));
-    renderPointsList();
-  } catch(e) {
-    console.error(e);
-    showNotification('Failed to reorder', 'error');
-  }
-}
-
-function renderCategoriesList() {
-  const c = document.getElementById('catsList');
-  if (!categories.length) {
-    c.innerHTML = '<div style="color:var(--text-secondary);font-size:0.75rem;padding:0.5rem 0">No categories yet.</div>';
-    return;
-  }
-  c.innerHTML = categories.map(cat => {
-    const on = activeCategories.has(cat.name);
-    return `<div class="cat-row${on ? '' : ' off'}">
-      <div class="cat-row-swatch" style="background:${cat.color};${on ? '' : 'opacity:0.3;'}">${cat.icon}</div>
-      <div class="cat-row-body" onclick="openEditCategory('${cat.id}')">
-        <div class="cat-row-name">${escapeHtml(cat.name)}</div>
-        <div class="cat-row-hex">${cat.color}</div>
-      </div>
-      <button class="cat-eye" onclick="event.stopPropagation();toggleCategoryVisibility('${escapeHtml(cat.name)}')" title="${on ? 'Hide' : 'Show'} on map">
-        ${on ? '👁' : '⊘'}
-      </button>
-    </div>`;
-  }).join('');
-}
-
-function toggleCategoryVisibility(name) {
-  if (activeCategories.has(name)) activeCategories.delete(name);
-  else activeCategories.add(name);
-  renderPointsLayer();
-  renderCategoriesList();
-}
-
-function focusPoint(id) {
-  const p = manualPoints.find(x => x.id === id);
-  if (!p) return;
-  map.setView([p.lat, p.lng], 14);
-}
-
-// ── Add point flow ─────────────────────────────────────────
-function startAddPoint() {
-  addPointMode = true;
-  document.getElementById('addModeHint').style.display = '';
-  document.getElementById('addPointBtn').style.display = 'none';
-  map.getContainer().style.cursor = 'crosshair';
-}
-function cancelAddPoint() {
-  addPointMode = false;
-  document.getElementById('addModeHint').style.display = 'none';
-  document.getElementById('addPointBtn').style.display = '';
-  map.getContainer().style.cursor = '';
-}
-function openAddByAddress() {
-  cancelAddPoint();
-  openPointModal(null, { label:'', category: categories[0]?.name || '', lat: '', lng: '', address: '', notes: '' });
-  document.getElementById('pmAddress').focus();
-}
-
-// Map click handler — set up once map exists
-function attachMapClickForAdd() {
-  if (!map) return;
-  map.on('click', e => {
-    if (!addPointMode) return;
-    cancelAddPoint();
-    openPointModal(null, {
-      label: '', category: categories[0]?.name || '',
-      lat: e.latlng.lat.toFixed(6), lng: e.latlng.lng.toFixed(6),
-      address: '', notes: ''
-    });
-  });
-}
-
-// ── Point modal ────────────────────────────────────────────
-function openPointModal(id, vals) {
-  editingPointId = id;
-  document.getElementById('pointModalTitle').textContent = id ? 'Edit point' : 'Add point';
-  document.getElementById('pmDeleteBtn').style.display = id ? '' : 'none';
-  // Populate category dropdown
-  const sel = document.getElementById('pmCategory');
-  sel.innerHTML = categories.map(c =>
-    `<option value="${escapeHtml(c.name)}" ${c.name === vals.category ? 'selected' : ''}>${c.icon} ${escapeHtml(c.name)}</option>`).join('');
-  document.getElementById('pmLabel').value   = vals.label   || '';
-  document.getElementById('pmAddress').value = vals.address || '';
-  document.getElementById('pmLat').value     = vals.lat     || '';
-  document.getElementById('pmLng').value     = vals.lng     || '';
-  document.getElementById('pmNotes').value   = vals.notes   || '';
-  document.getElementById('pointModal').style.display = '';
-}
-function closePointModal() {
-  document.getElementById('pointModal').style.display = 'none';
-  editingPointId = null;
-}
-function openEditPoint(id) {
-  const p = manualPoints.find(x => x.id === id);
-  if (!p) return;
-  openPointModal(id, p);
-}
-
-async function savePoint() {
-  let lat = parseFloat(document.getElementById('pmLat').value);
-  let lng = parseFloat(document.getElementById('pmLng').value);
-  const label   = document.getElementById('pmLabel').value.trim();
-  const category= document.getElementById('pmCategory').value;
-  const address = document.getElementById('pmAddress').value.trim();
-  const notes   = document.getElementById('pmNotes').value.trim();
-  if (!label) { alert('Please enter a label.'); return; }
-
-  // If no coords but address given, try to geocode it
-  if ((isNaN(lat) || isNaN(lng)) && address) {
-    const geo = await geocodeAddress(address);
-    if (geo) { lat = geo.lat; lng = geo.lng; }
-  }
-  if (isNaN(lat) || isNaN(lng)) {
-    alert('Please provide either coordinates or a valid address (UK).');
-    return;
-  }
-
-  const fields = {
-    Title:     label,
-    Category:  category,
-    Latitude:  String(lat),
-    Longitude: String(lng),
-    Address:   address,
-    Notes:     notes,
-  };
-  try {
-    const listId = await getListId(CONFIG.pointsListName);
-    if (editingPointId) {
-      await graphMutate('PATCH',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingPointId}/fields`,
-        fields);
-    } else {
-      await graphMutate('POST',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
-        { fields });
-    }
-    closePointModal();
-    await loadPointsAndCategories();
-    showNotification(editingPointId ? 'Point updated' : 'Point added', 'ok');
-  } catch(e) {
-    console.error(e);
-    showNotification('Failed to save point', 'error');
-  }
-}
-
-async function deletePoint() {
-  if (!editingPointId) return;
-  if (!confirm('Delete this point?')) return;
-  try {
-    const listId = await getListId(CONFIG.pointsListName);
-    await graphMutate('DELETE',
-      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingPointId}`);
-    closePointModal();
-    await loadPointsAndCategories();
-    showNotification('Point deleted', 'ok');
-  } catch(e) {
-    console.error(e);
-    showNotification('Failed to delete point', 'error');
-  }
-}
-
-// ── Category modal ─────────────────────────────────────────
-function addCategory() {
-  editingCatId = null;
-  document.getElementById('catModalTitle').textContent = 'Add category';
-  document.getElementById('cmDeleteBtn').style.display = 'none';
-  document.getElementById('cmName').value = '';
-  document.getElementById('cmColor').value = '#7f8c8d';
-  document.getElementById('cmIcon').value = '•';
-  document.getElementById('catModal').style.display = '';
-}
-function openEditCategory(id) {
-  const c = categories.find(x => x.id === id);
-  if (!c) return;
-  editingCatId = id;
-  document.getElementById('catModalTitle').textContent = 'Edit category';
-  document.getElementById('cmDeleteBtn').style.display = '';
-  document.getElementById('cmName').value = c.name;
-  document.getElementById('cmColor').value = c.color;
-  document.getElementById('cmIcon').value = c.icon;
-  document.getElementById('catModal').style.display = '';
-}
-function closeCatModal() {
-  document.getElementById('catModal').style.display = 'none';
-  editingCatId = null;
-}
-async function saveCategory() {
-  const name  = document.getElementById('cmName').value.trim();
-  const color = document.getElementById('cmColor').value;
-  const icon  = document.getElementById('cmIcon').value.trim() || '•';
-  if (!name) { alert('Please enter a name.'); return; }
-  const fields = { Title: name, Color: color, Icon: icon };
-  try {
-    const listId = await getListId(CONFIG.categoriesListName);
-    if (editingCatId) {
-      await graphMutate('PATCH',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingCatId}/fields`,
-        fields);
-    } else {
-      await graphMutate('POST',
-        `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
-        { fields });
-    }
-    closeCatModal();
-    await loadPointsAndCategories();
-    showNotification(editingCatId ? 'Category updated' : 'Category added', 'ok');
-  } catch(e) {
-    console.error(e);
-    showNotification('Failed to save category', 'error');
-  }
-}
-async function deleteCategory() {
-  if (!editingCatId) return;
-  const c = categories.find(x => x.id === editingCatId);
-  const usedBy = manualPoints.filter(p => p.category === c?.name).length;
-  let msg = 'Delete this category?';
-  if (usedBy > 0) msg += `\n\n${usedBy} point(s) currently use it. Those points will keep the category text but lose its colour/icon.`;
-  if (!confirm(msg)) return;
-  try {
-    const listId = await getListId(CONFIG.categoriesListName);
-    await graphMutate('DELETE',
-      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${editingCatId}`);
-    closeCatModal();
-    await loadPointsAndCategories();
-    showNotification('Category deleted', 'ok');
-  } catch(e) {
-    console.error(e);
-    showNotification('Failed to delete category', 'error');
-  }
-}
-
-// ── Address geocoding (UK postcodes preferred, falls back to Nominatim) ──
-async function geocodeAddress(addr) {
-  // Try postcode first
-  const pcMatch = addr.match(/[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i);
-  if (pcMatch) {
-    const clean = pcMatch[0].replace(/\s+/g, '').toUpperCase();
-    try {
-      const r = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
-      if (r.ok) {
-        const j = await r.json();
-        if (j.status === 200 && j.result) return { lat: j.result.latitude, lng: j.result.longitude };
-      }
-    } catch {}
-  }
-  // Fall back to Nominatim (free-text)
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr + ', UK')}&format=json&limit=1`);
-    if (r.ok) {
-      const j = await r.json();
-      if (j.length) return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
-    }
-  } catch {}
-  return null;
-}
-
-// ═══════════════════════════════════════════════════════════
-// MAP SEARCH (projects / postcodes / places)
-// ═══════════════════════════════════════════════════════════
-let _searchTimer = null;
-let _searchResults = [];
-let _searchSelectedIdx = -1;
-let _searchSeq = 0;   // ignore stale async results
-
-function initMapSearch() {
-  const input = document.getElementById('mapSearchInput');
-  const results = document.getElementById('mapSearchResults');
-  if (!input) return;
-
-  input.addEventListener('input', () => {
-    const q = input.value.trim();
-    clearTimeout(_searchTimer);
-    if (!q) { hideSearchResults(); return; }
-    // Always show project matches immediately (synchronous)
-    const seq = ++_searchSeq;
-    const projects = searchProjects(q).slice(0, 8);
-    _searchResults = projects.map(p => ({ kind: 'project', ...p }));
-    renderSearchResults();
-    // Debounced free-text geocode (Nominatim) for fallback
-    _searchTimer = setTimeout(async () => {
-      const geo = await searchGeocode(q);
-      if (seq !== _searchSeq) return;
-      // Merge geocode results below projects
-      const existing = new Set(_searchResults.map(r => r.label));
-      geo.slice(0, 5).forEach(g => {
-        if (!existing.has(g.label)) _searchResults.push({ kind: 'place', ...g });
-      });
-      renderSearchResults();
-    }, 400);
-  });
-
-  input.addEventListener('keydown', (e) => {
-    if (!_searchResults.length) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      _searchSelectedIdx = Math.min(_searchSelectedIdx + 1, _searchResults.length - 1);
-      renderSearchResults();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      _searchSelectedIdx = Math.max(_searchSelectedIdx - 1, 0);
-      renderSearchResults();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      const idx = _searchSelectedIdx >= 0 ? _searchSelectedIdx : 0;
-      pickSearchResult(idx);
-    } else if (e.key === 'Escape') {
-      hideSearchResults();
-    }
-  });
-
-  input.addEventListener('focus', () => {
-    if (_searchResults.length) results.classList.add('visible');
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.map-search')) hideSearchResults();
-  });
-}
-
-function searchProjects(q) {
-  if (!projectLookup) return [];
-  const qLower = q.toLowerCase();
-  const qDigits = q.replace(/\D/g, '');
-  const matches = [];
-  for (const num in projectLookup) {
-    const p = projectLookup[num];
-    let hit = false;
-    if (qDigits && num.startsWith(qDigits)) hit = true;
-    else if (p.site && p.site.toLowerCase().includes(qLower)) hit = true;
-    else if (p.town && p.town.toLowerCase().includes(qLower)) hit = true;
-    else if (p.county && p.county.toLowerCase().includes(qLower)) hit = true;
-    else if (p.postcode && p.postcode.replace(/\s+/g, '').toLowerCase().includes(qLower.replace(/\s+/g, ''))) hit = true;
-    if (hit && p.lat != null && p.lng != null) {
-      matches.push({
-        label: p.site || `Project ${num}`,
-        sub:   [num, p.town, p.county].filter(Boolean).join(' · '),
-        lat:   p.lat,
-        lng:   p.lng,
-        zoom:  14,
-      });
-    }
-  }
-  // Prefer prefix matches on project number first
-  matches.sort((a, b) => {
-    const aHasPrefix = a.sub.startsWith(qDigits || '~') ? -1 : 0;
-    const bHasPrefix = b.sub.startsWith(qDigits || '~') ? -1 : 0;
-    return aHasPrefix - bHasPrefix;
-  });
-  return matches;
-}
-
-async function searchGeocode(q) {
-  const out = [];
-  // Postcode match — show as a dedicated result
-  const pcMatch = q.match(/[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i);
-  if (pcMatch) {
-    const clean = pcMatch[0].replace(/\s+/g, '').toUpperCase();
-    try {
-      const r = await fetch(`https://api.postcodes.io/postcodes/${clean}`);
-      if (r.ok) {
-        const j = await r.json();
-        if (j.status === 200 && j.result) {
-          out.push({
-            label: clean,
-            sub:   `${j.result.admin_district || ''}, UK`,
-            lat:   j.result.latitude,
-            lng:   j.result.longitude,
-            zoom:  15,
-          });
-        }
-      }
-    } catch {}
-  }
-  // Free-text → Nominatim
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', UK')}&format=json&limit=5&countrycodes=gb,ie`);
-    if (r.ok) {
-      const j = await r.json();
-      j.forEach(item => {
-        out.push({
-          label: item.display_name.split(',')[0],
-          sub:   item.display_name,
-          lat:   parseFloat(item.lat),
-          lng:   parseFloat(item.lon),
-          zoom:  13,
-        });
-      });
-    }
-  } catch {}
-  return out;
-}
-
-function renderSearchResults() {
-  const box = document.getElementById('mapSearchResults');
-  if (!_searchResults.length) { box.classList.remove('visible'); return; }
-  box.classList.add('visible');
-  box.innerHTML = _searchResults.map((r, i) => `
-    <div class="search-result ${i === _searchSelectedIdx ? 'selected' : ''}" onclick="pickSearchResult(${i})">
-      <div class="sr-type">${r.kind === 'project' ? '🏗 Project' : '📍 Place'}</div>
-      <div class="sr-title">${escapeHtml(r.label)}</div>
-      ${r.sub ? `<div class="sr-sub">${escapeHtml(r.sub)}</div>` : ''}
-    </div>`).join('');
-}
-
-function pickSearchResult(i) {
-  const r = _searchResults[i];
-  if (!r) return;
-  map.flyTo([r.lat, r.lng], r.zoom || 13, { duration: 0.8 });
-  document.getElementById('mapSearchInput').value = r.label;
-  hideSearchResults();
-}
-
-function hideSearchResults() {
-  _searchSelectedIdx = -1;
-  document.getElementById('mapSearchResults').classList.remove('visible');
-}
-
-// ── Graph mutation helper ──────────────────────────────────
-async function graphMutate(method, path, body) {
-  const token = await getGraphToken();
-  if (!token) throw new Error('No token');
-  const opts = {
-    method,
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json',
-    },
-  };
-  if (body !== undefined) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, opts);
-  if (!res.ok && res.status !== 204) {
-    const txt = await res.text();
-    throw new Error(`Graph ${res.status}: ${txt}`);
-  }
-  return res.status === 204 ? null : res.json();
-}
-
-function formatDateRange(dates) {
-  if (!dates.length) return '';
-  const fmt = d => {
-    const dt = new Date(d);
-    const dow = dt.toLocaleDateString('en-GB', { weekday: 'short' });
-    const day = dt.getDate();
-    const suffix = (day >= 11 && day <= 13) ? 'th' :
-                   day % 10 === 1 ? 'st' : day % 10 === 2 ? 'nd' : day % 10 === 3 ? 'rd' : 'th';
-    return `${dow} ${day}${suffix}`;
-  };
-  if (dates.length === 1) return fmt(dates[0]);
-  return `${fmt(dates[0])} – ${fmt(dates[dates.length - 1])}`;
-}
-
-function formatTimeRange(startISO, endISO) {
-  if (!startISO) return '';
-  try {
-    const s = new Date(startISO);
-    const e = endISO ? new Date(endISO) : null;
-    const fmt = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    if (e) return `${fmt(s)} – ${fmt(e)}`;
-    return fmt(s);
-  } catch { return ''; }
-}
-
-function buildPopup(loc, persons) {
-  const events = loc.events;
-  const first = events[0];
-  const proj = first.projectNo ? `<div class="popup-row"><span>Project</span><strong>${first.projectNo}</strong></div>` : '';
-
-  // Per-person date+time rows
-  const personRows = persons.map(p => {
-    const theirs = events.filter(e => e.person === p).sort((a,b) => (a.startISO||'').localeCompare(b.startISO||''));
-    const lines = theirs.map(e => {
-      const t = formatTimeRange(e.startISO, e.endISO);
-      const d = formatDateRange([e.date]);
-      const v = e.vehicle ? ` · 🚗 ${escapeHtml(e.vehicle)}` : '';
-      return `<div class="popup-attend-line">${d}${t?' · '+t:''}${v}</div>`;
-    }).join('');
-    return `<div class="popup-attendee">
-      <span class="popup-person-chip" style="background:${staffColor(p)}">${p}</span>
-      ${lines}
-    </div>`;
-  }).join('');
-
-  return `<div class="popup-inner">
-    <div class="popup-header">${first.type} · ${first.town||''}${first.county?', '+first.county:''}</div>
-    <div class="popup-title">${first.title.replace(/^SURVEY\s*–\s*/i,'').replace(/^MEETING\s*–\s*/i,'')}</div>
-    ${proj}
-    <div class="popup-attendees">${personRows}</div>
-  </div>`;
-}
-
-function renderTable() {
-  const tbody = document.getElementById('tableBody');
-  tbody.innerHTML = surveyEvents.map(e => {
-    const color = staffColor(e.person);
-    return `<tr onclick="focusEvent(${e.id})">
-      <td><div class="td-person"><div class="person-dot" style="background:${color}"></div>${e.person}</div></td>
-      <td style="font-family:'DM Mono',monospace;font-size:0.72rem">${formatDateShort(e.date)}</td>
-      <td style="font-family:'DM Mono',monospace;font-size:0.72rem">${e.projectNo||'—'}</td>
-      <td>${e.title.replace(/^(SURVEY|MEETING)\s*–\s*/i,'')}</td>
-      <td>${e.town||'—'}</td>
-      <td>${e.county||'—'}</td>
-      <td><span class="type-tag" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.15rem 0.5rem;background:var(--mist);border-radius:2px">${e.type}</span></td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-secondary);font-family:'DM Mono',monospace;font-size:0.72rem">No events for this week</td></tr>`;
-}
-
-// ═══════════════════════════════════════════════════════════
-// INTERACTIONS
-// ═══════════════════════════════════════════════════════════
-function focusEvent(id) {
-  const e = allEvents.find(x => x.id === id);
-  if (!e || !e.lat) return;
-  if (currentView !== 'map') setView('map');
-  map.flyTo([e.lat, e.lng], 11, { duration: 0.8 });
-  // Highlight sidebar card
-  document.querySelectorAll('.event-card').forEach(c => c.classList.remove('active'));
-  const card = document.querySelector(`.event-card[data-id="${id}"]`);
-  if (card) { card.classList.add('active'); card.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
-  maybeCloseSidebar();
-}
-
-function setView(view) {
-  currentView = view;
-  document.getElementById('btnMap').classList.toggle('active', view === 'map');
-  document.getElementById('btnTable').classList.toggle('active', view === 'table');
-  document.getElementById('btnGrid').classList.toggle('active', view === 'grid');
-  document.getElementById('map').style.display = view === 'map' ? 'block' : 'none';
-  document.getElementById('tableView').classList.toggle('visible', view === 'table');
-  document.getElementById('gridView').classList.toggle('visible', view === 'grid');
-  if (view === 'map') { setTimeout(() => map.invalidateSize(), 50); }
-  if (view === 'grid') renderGrid();
-}
-
-// Calendar (grid) view event colors by type
-const TYPE_COLORS = {
-  'Field survey':                '#4a8d3e',   // green
-  'Field survey (out of hours)': '#2c6622',   // darker green
-  'Survey':                      '#4a8d3e',   // legacy
-  'Office':                      '#2a6db5',   // blue
-  'WFH':                         '#e8b800',   // yellow
-  'Leave':                       '#e67e22',   // orange
-};
-function typeColor(t) { return TYPE_COLORS[t] || '#888'; }
-
-function renderGrid() {
-  const container = document.getElementById('gridScroll');
-  const ws = currentWeekStart;
-  const days = [];
-  if (dayFilter) {
-    days.push(new Date(dayFilter));
-  } else {
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(ws);
-      d.setDate(d.getDate() + i);
-      days.push(d);
-    }
-  }
-  const todayISO = fmtDateLocal(new Date());
-  // Calendar view shows ALL staff (not just those active in chip filter or on site)
-  const validStaff = staffList.slice();
-
-  // Index events by person+date — use ALL events in the week, not just filteredEvents
-  const ws_end = getWeekEnd(currentWeekStart);
-  const validStaffNames = new Set(staffList.map(s => s.name));
-  const weekEvents = allEvents.filter(e => {
-    const d = new Date(e.date);
-    return d >= currentWeekStart && d <= ws_end && validStaffNames.has(e.person);
-  });
-  const eventsBy = {};
-  weekEvents.forEach(e => {
-    const k = e.person + '|' + e.date;
-    if (!eventsBy[k]) eventsBy[k] = [];
-    eventsBy[k].push(e);
-  });
-
-  const fmtDay = d => {
-    const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
-    const day = d.getDate();
-    const mon = d.toLocaleDateString('en-GB', { month: 'short' });
-    return `${dow}<br>${day} ${mon}`;
-  };
-
-  let html = '<div class="grid-legend">';
-  ['Field survey','Office','WFH','Leave'].forEach(t => {
-    html += `<span class="grid-legend-item"><span class="grid-legend-swatch" style="background:${typeColor(t)}"></span>${t}</span>`;
-  });
-  html += '</div>';
-
-  html += '<table class="week-grid"><thead><tr><th>Staff</th>';
-  days.forEach(d => {
-    const dISO = fmtDateLocal(d);
-    const isToday = dISO === todayISO;
-    html += `<th class="${isToday?'today':''}">${fmtDay(d)}</th>`;
-  });
-  html += '</tr></thead><tbody>';
-
-  validStaff.forEach(s => {
-    html += `<tr><td class="person-cell" style="color:${s.color}">${shortName(s.name)}</td>`;
-    days.forEach(d => {
-      const dISO = fmtDateLocal(d);
-      const isToday = dISO === todayISO;
-      const evs = eventsBy[s.name + '|' + dISO] || [];
-      // Identify a dominant full-day event type for the cell
-      const fullDay = evs.find(e => e.type === 'Office' || e.type === 'WFH' || e.type === 'Leave');
-      let cellBg = '';
-      if (fullDay) {
-        const tint = { 'Office': '#dbe9f9', 'WFH': '#fbf3cf', 'Leave': '#f6dccb' }[fullDay.type];
-        if (tint) cellBg = `background:${tint};`;
-      }
-      // Sort: surveys first (by start time), then full-day events
-      evs.sort((a, b) => {
-        const aSurvey = isSurveyType(a.type) ? 0 : 1;
-        const bSurvey = isSurveyType(b.type) ? 0 : 1;
-        if (aSurvey !== bSurvey) return aSurvey - bSurvey;
-        return (a.startISO || '').localeCompare(b.startISO || '');
-      });
-      html += `<td class="${isToday?'today':''}" style="${cellBg}">`;
-      evs.forEach(e => {
-        const color = typeColor(e.type);
-        const loc = e.town || e.county || '';
-        const title = (e.title || '').replace(/^(SURVEY|MEETING)\s*–\s*/i,'');
-        const isSurvey = isSurveyType(e.type);
-        const vehLine = e.vehicle ? `<div class="grid-event-veh">🚗 ${escapeHtml(e.vehicle)}</div>` : '';
-        if (isSurvey) {
-          const body = `${e.projectNo ? `<div class="grid-event-proj">#${e.projectNo}</div>` : ''}
-             ${title ? `<div>${title.substring(0, 40)}</div>` : ''}
-             ${loc ? `<div class="grid-event-loc">${loc}</div>` : ''}
-             ${vehLine}`;
-          html += `<div class="grid-event" style="background:${color}" onclick="focusEvent('${e.id}')">${body}</div>`;
-        }
-        // Don't render Office / WFH / Leave as chips — the cell tint is enough
-      });
-      html += '</td>';
-    });
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
-  container.innerHTML = html;
-}
-
-async function changeWeek(dir) {
-  const d = new Date(currentWeekStart);
-  d.setDate(d.getDate() + dir * 7);
-  currentWeekStart = d;
-  dayFilter = null;   // reset day filter on week change
-  updateWeekLabel();
-  if (CONFIG.useLiveData) {
-    await fetchAllStaffCalendars(false);
-    buildStaffFilter();
-  }
-  renderAll();
-}
-
-async function goToThisWeek() {
-  currentWeekStart = getWeekStart(new Date());
-  dayFilter = null;
-  updateWeekLabel();
-  if (CONFIG.useLiveData) {
-    await fetchAllStaffCalendars(false);
-    buildStaffFilter();
-  }
-  renderAll();
-}
-
-// ═══════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════
-function getWeekStart(d) {
-  const date = new Date(d);
-  const day = date.getDay(); // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day; // Mon
-  date.setDate(date.getDate() + diff);
-  date.setHours(0,0,0,0);
-  return date;
-}
-function getWeekEnd(ws) {
-  const d = new Date(ws);
-  d.setDate(d.getDate() + 6);
-  d.setHours(23,59,59,999);
-  return d;
-}
-
-function updateWeekLabel() {
-  const ws = currentWeekStart;
-  const we = getWeekEnd(ws);
-  const fmt = d => d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
-  document.getElementById('weekLabel').textContent =
-    `w/c ${fmt(ws)}  —  ${fmt(we)} ${we.getFullYear()}`;
-}
-
-function staffColor(name) {
-  return staffList.find(s => s.name === name)?.color || '#888';
-}
-
-function groupByDate(events) {
-  const map = new Map();
-  [...events].sort((a,b) => a.date.localeCompare(b.date)).forEach(e => {
-    if (!map.has(e.date)) map.set(e.date, []);
-    map.get(e.date).push(e);
-  });
-  return map;
-}
-
-function formatDateLabel(dateStr) {
-  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' });
-}
-function formatDateShort(dateStr) {
-  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short' });
-}
-
-function showLoading(show) {
-  document.getElementById('loadingOverlay').classList.toggle('hidden', !show);
-
-  if (!show) clearSubLoadingMessage();
-}
-
-const _loadingTasks = new Set();
-function setLoading(name, on) {
-  if (on) _loadingTasks.add(name);
-  else    _loadingTasks.delete(name);
-  const badge = document.getElementById('loadingBadge');
-  const text  = document.getElementById('loadingBadgeText');
-  if (_loadingTasks.size > 0) {
-    text.textContent = [..._loadingTasks][0];
-    badge.classList.add('visible');
-  } else {
-    badge.classList.remove('visible');
-  }
-}
-
-function showNotification(msg, type='ok') {
-  const el = document.getElementById('notification');
-  el.textContent = msg;
-  el.className = 'notification show' + (type==='error'?' error':'');
-  setTimeout(() => el.classList.remove('show'), 3500);
-}
-</script>
-</body>
-</html>
+f
