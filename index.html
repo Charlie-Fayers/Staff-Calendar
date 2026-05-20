@@ -1548,6 +1548,22 @@ async function graphPost(path, body) {
   return res.json();
 }
 
+async function graphPatch(path, body) {
+  const token = await getGraphToken();
+  if (!token) return null;
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(`Graph PATCH ${res.status}: ${await res.text()}`);
+  return res.status === 204 ? {} : res.json();
+}
+
 // Cache for resolved Graph list IDs
 const _listIdCache = {};
 async function getListId(listName) {
@@ -2400,10 +2416,10 @@ async function fetchWonProjectsCache() {
 
       projectLookup[projectNo] = {
         projectNo,
-        site:     String(f.ProjectName || '').trim(),
+        site:     String(f.Site || f.ProjectName || f.SiteName || '').trim(),
         town:     String(f.Town || '').trim(),
         county:   String(f.County || '').trim(),
-        postcode: '',
+        postcode: String(f.Postcode || f.PostCode || '').trim(),
         lat:      f.Latitude  != null && f.Latitude  !== '' ? Number(f.Latitude)  : null,
         lng:      f.Longitude != null && f.Longitude !== '' ? Number(f.Longitude) : null,
       };
@@ -2474,6 +2490,11 @@ async function refreshFromLiveSourcesInBackground() {
     buildStaffFilter();
     renderAll();
 
+    // Write fresh data back to the SharePoint cache lists (best-effort).
+    const weekEvents = _loadedWeekEvents[weekKey] || [];
+    upsertCalendarCacheItems(weekEvents);
+    upsertWonProjectsCacheItems(weekEvents);
+
     if (CONFIG.backgroundRefreshMessage) showNotification('Live calendar data refreshed', 'ok');
   } catch (e) {
     console.warn('Live background refresh failed:', e);
@@ -2481,6 +2502,120 @@ async function refreshFromLiveSourcesInBackground() {
   } finally {
     setLoading('Refreshing live data in background…', false);
     clearSubLoadingMessage();
+  }
+}
+
+// ── Cache write-back ────────────────────────────────────────
+// Writes live Outlook events back to StaffCalendarCache so the next page load
+// can show them instantly without waiting for Outlook.
+async function upsertCalendarCacheItems(events) {
+  try {
+    const listId = await getListId(CONFIG.calendarListName);
+    const now = new Date().toISOString();
+
+    // Fetch existing items so we can update rather than duplicate.
+    const existing = await graphFetchPaged(
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
+    );
+    const existingByOutlookId = {};
+    (existing && existing.value || []).forEach(item => {
+      const oid = (item.fields || {}).OutlookEventId;
+      if (oid) existingByOutlookId[oid] = item.id;
+    });
+
+    for (const e of (events || [])) {
+      if (!e || !e.date) continue;
+      const fields = {
+        Title:          String(e.title || `${e.person || ''} ${e.date || ''}`),
+        StaffName:      String(e.person || ''),
+        StaffEmail:     String(e.staffEmail || e.email || ''),
+        EventDate:      String(e.startISO || e.date),
+        EventEnd:       String(e.endISO || e.date),
+        ProjectNumber:  String(e.projectNo || ''),
+        EventType:      String(e.type || ''),
+        Town:           String(e.town || ''),
+        County:         String(e.county || ''),
+        Latitude:       Number.isFinite(Number(e.lat)) ? Number(e.lat) : null,
+        Longitude:      Number.isFinite(Number(e.lng)) ? Number(e.lng) : null,
+        OutlookEventId: String(e.outlookEventId || e.id || ''),
+        LastSynced:     now,
+      };
+      const outlookId = fields.OutlookEventId;
+      try {
+        if (outlookId && existingByOutlookId[outlookId]) {
+          // Update existing row.
+          await graphPatch(
+            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByOutlookId[outlookId]}/fields`,
+            fields
+          );
+        } else {
+          await graphPost(
+            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
+            { fields }
+          );
+        }
+      } catch (inner) {
+        console.warn('StaffCalendarCache write failed for event:', inner.message, fields.Title);
+      }
+    }
+    console.log(`StaffCalendarCache updated: ${events.length} event(s)`);
+  } catch (e) {
+    console.warn('StaffCalendarCache update skipped:', e.message);
+  }
+}
+
+// Writes resolved project locations back to WonProjectsCache so lat/lng are
+// available on the next cache-first load without hitting the workbook.
+async function upsertWonProjectsCacheItems(events) {
+  try {
+    const listId = await getListId(CONFIG.projectLocationCacheListName);
+
+    // Fetch existing items keyed by project number (stored in Title field).
+    const existing = await graphFetchPaged(
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
+    );
+    const existingByProjectNo = {};
+    (existing && existing.value || []).forEach(item => {
+      const f = item.fields || {};
+      const proj = normaliseProjectNo(f.Title || f.ProjectNumber || '');
+      if (proj) existingByProjectNo[proj] = item.id;
+    });
+
+    const seen = new Set();
+    for (const e of (events || [])) {
+      if (!e || !e.projectNo || seen.has(e.projectNo)) continue;
+      seen.add(e.projectNo);
+      const loc = projectLookup[e.projectNo];
+      if (!loc) continue;
+      const fields = {
+        Title:         String(e.projectNo),
+        ProjectNumber: String(e.projectNo),
+        Site:          String(loc.site || ''),
+        Town:          String(loc.town || ''),
+        County:        String(loc.county || ''),
+        Postcode:      String(loc.postcode || ''),
+        Latitude:      loc.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
+        Longitude:     loc.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
+      };
+      try {
+        if (existingByProjectNo[e.projectNo]) {
+          await graphPatch(
+            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByProjectNo[e.projectNo]}/fields`,
+            fields
+          );
+        } else {
+          await graphPost(
+            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
+            { fields }
+          );
+        }
+      } catch (inner) {
+        console.warn('WonProjectsCache write failed for project:', inner.message, e.projectNo);
+      }
+    }
+    console.log(`WonProjectsCache updated: ${seen.size} project(s)`);
+  } catch (e) {
+    console.warn('WonProjectsCache update skipped:', e.message);
   }
 }
 
@@ -2561,7 +2696,6 @@ let _vehicleBookingsByWeek = {};  // week key -> booking[]
 async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), endDate = getWeekEnd(currentWeekStart)) {
   const weekKey = getWeekKey(startDate);
   if (_vehicleBookingsByWeek[weekKey]) return _vehicleBookingsByWeek[weekKey];
-
   try {
     const startISO = startDate.toISOString().split('.')[0] + 'Z';
     const endForGraph = new Date(endDate);
@@ -2569,22 +2703,17 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     const endISO = endForGraph.toISOString().split('.')[0] + 'Z';
     const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
     const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
-
     const data = await graphFetchPaged(path);
     const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
       const vehicleFromCategory = extractVehicleName(ev.categories || []);
-
       return {
-        title:     subject,
-        vehicle:   vehicleFromCategory, // no fallback: if category is missing, leave blank
-        projectNo: extractProjectNo(subject),
-        initials:  extractInitialsTokens(subject),
-        start:     ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
-        end:       ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
+        title:   subject,
+        vehicle: vehicleFromCategory,
+        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
-
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
@@ -2595,94 +2724,6 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
 }
 
 // Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
-
-function extractInitialsTokens(str) {
-  const tokens = (str || '').toUpperCase().match(/\b[A-Z]{2,4}\b/g) || [];
-  return new Set(tokens);
-}
-
-function eventDayRange(event) {
-  const d = new Date(event.date);
-  const start = new Date(d);
-  start.setHours(0,0,0,0);
-  const end = new Date(d);
-  end.setHours(23,59,59,999);
-  return { start, end };
-}
-
-function bookingOverlapsEventDay(booking, event) {
-  const r = eventDayRange(event);
-  return booking.start <= r.end && booking.end >= r.start;
-}
-
-function vehicleBookingMatchesEvent(booking, event, staff) {
-  if (!booking || !event || !staff) return false;
-  if (!bookingOverlapsEventDay(booking, event)) return false;
-
-  const eventProject = event.projectNo || extractProjectNo(event.title || '');
-  const bookingProject = booking.projectNo || extractProjectNo(booking.title || '');
-
-  if (eventProject && bookingProject && eventProject === bookingProject) return true;
-
-  const possibleInitials = initialsForName(staff.name || event.person || '');
-  if (booking.initials && possibleInitials.some(i => i && booking.initials.has(i.toUpperCase()))) return true;
-
-  return false;
-}
-
-function assignVehiclesToSiteVisits(events, bookings) {
-  if (!Array.isArray(events) || !Array.isArray(bookings) || bookings.length === 0) {
-    (events || []).forEach(e => { if (e && isSurveyType(e.type)) e.vehicle = ''; });
-    return;
-  }
-
-  const staffByName = new Map(staffList.map(s => [s.name, s]));
-  const groups = new Map();
-
-  events.filter(e => e && isSurveyType(e.type)).forEach(e => {
-    e.vehicle = '';
-    const projectKey = e.projectNo || extractProjectNo(e.title || '') || (e.title || '').trim();
-    const key = `${e.date}|${projectKey}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(e);
-  });
-
-  groups.forEach(group => {
-    const first = group[0];
-    const projectNo = first.projectNo || extractProjectNo(first.title || '');
-
-    const candidates = bookings.filter(b =>
-      b.vehicle &&
-      group.some(e => bookingOverlapsEventDay(b, e))
-    );
-
-    if (projectNo) {
-      const projectMatches = candidates.filter(b => b.projectNo === projectNo);
-      const uniqueProjectVehicles = [...new Set(projectMatches.map(b => b.vehicle).filter(Boolean))];
-
-      if (uniqueProjectVehicles.length === 1) {
-        group.forEach(e => { e.vehicle = uniqueProjectVehicles[0]; });
-        return;
-      }
-
-      if (uniqueProjectVehicles.length > 1) {
-        return;
-      }
-    }
-
-    const initialsMatches = candidates.filter(b => group.some(e => {
-      const staff = staffByName.get(e.person) || { name: e.person };
-      return vehicleBookingMatchesEvent(b, e, staff);
-    }));
-
-    const uniqueInitialVehicles = [...new Set(initialsMatches.map(b => b.vehicle).filter(Boolean))];
-    if (uniqueInitialVehicles.length === 1) {
-      group.forEach(e => { e.vehicle = uniqueInitialVehicles[0]; });
-    }
-  });
-}
-
-
 function initialsForName(name) {
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
@@ -2694,7 +2735,64 @@ function initialsForName(name) {
 }
 
 function attachVehicles(events, bookings) {
-  assignVehiclesToSiteVisits(events, bookings);
+  if (!bookings || !bookings.length) return;
+
+  // Clear any existing vehicle assignments on survey events first.
+  events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
+
+  // Group survey events by project+date so people travelling together share
+  // exactly one vehicle rather than each getting an independent assignment.
+  const groups = new Map();
+  events.forEach(e => {
+    if (!isSurveyType(e.type) || !e.date) return;
+    const projKey = e.projectNo || `${(e.lat||'')},${(e.lng||'')}` || e.title;
+    const key = `${e.date}|${projKey}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  });
+
+  groups.forEach(group => {
+    const e0 = group[0];
+    const eventDate = new Date(e0.date);
+    if (isNaN(eventDate)) return;
+
+    const evDayStart = new Date(eventDate); evDayStart.setHours(0, 0, 0, 0);
+    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23, 59, 59, 999);
+
+    // Bookings that overlap this date at all.
+    const dayBookings = bookings.filter(b =>
+      b.start <= evDayEnd && b.end >= evDayStart
+    );
+    if (!dayBookings.length) return;
+
+    // Gather all initials tokens for everyone in the group.
+    const allInitials = group.flatMap(e => initialsForName(e.person));
+
+    // 1. Prefer a booking whose subject mentions any group member's initials.
+    const initialsMatch = dayBookings.find(b => {
+      const upper = b.title.toUpperCase();
+      return allInitials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
+    });
+
+    if (initialsMatch) {
+      // Confident match — assign to every member of the group.
+      group.forEach(e => { e.vehicle = initialsMatch.vehicle; });
+      return;
+    }
+
+    // 2. If there is exactly one booking that day, only assign it when there is
+    //    a project-number match in the subject — otherwise leave blank.
+    if (dayBookings.length === 1 && e0.projectNo) {
+      const projPattern = new RegExp(`\\b0?${e0.projectNo}\\b`);
+      if (projPattern.test(dayBookings[0].title)) {
+        group.forEach(e => { e.vehicle = dayBookings[0].vehicle; });
+      }
+      // No project match → no assignment (staff may be using their own car).
+      return;
+    }
+
+    // 3. Multiple bookings with no initials/project match → ambiguous, leave blank.
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
