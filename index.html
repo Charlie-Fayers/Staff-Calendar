@@ -1065,23 +1065,112 @@
   }
 
   /* ── NOTIFICATION ── */
-  .notification {
-    position: fixed;
-    top: 70px;
-    right: 1.5rem;
-    background: var(--ink);
-    color: var(--paper);
-    padding: 0.65rem 1rem;
-    border-radius: 4px;
+  /* ── LOG BUTTON ── */
+  .log-btn {
     font-family: 'DM Mono', monospace;
     font-size: 0.72rem;
-    z-index: 9998;
-    transform: translateY(-10px);
+    background: transparent;
+    border: 1px solid #444;
+    color: #aaa;
+    padding: 0.35rem 0.75rem;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+  }
+  .log-btn:hover { border-color: var(--sage-light); color: var(--sage-light); }
+  .log-btn.has-errors   { border-color: #c0392b; color: #e74c3c; }
+  .log-btn.has-warnings { border-color: #b7950b; color: #f1c40f; }
+
+  /* ── LOG PANEL ── */
+  .log-panel {
+    position: fixed; top: 60px; right: 0;
+    width: 420px; max-width: 100vw;
+    height: calc(100vh - 60px);
+    background: var(--ink); color: var(--paper);
+    display: flex; flex-direction: column;
+    z-index: 8000;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.25);
+    font-family: 'DM Mono', monospace;
+  }
+  .log-panel.open { transform: translateX(0); }
+  .log-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.75rem 1rem; border-bottom: 1px solid #333; flex-shrink: 0;
+  }
+  .log-panel-title { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sage-light); }
+  .log-panel-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .log-clear-btn, .log-close-btn {
+    font-family: 'DM Mono', monospace; font-size: 0.65rem;
+    background: transparent; border: 1px solid #444; color: #888;
+    padding: 0.2rem 0.5rem; border-radius: 3px; cursor: pointer; letter-spacing: 0.04em;
+  }
+  .log-close-btn { font-size: 0.9rem; padding: 0 0.4rem; }
+  .log-clear-btn:hover, .log-close-btn:hover { border-color: #888; color: var(--paper); }
+  .log-panel-legend {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.4rem 1rem; border-bottom: 1px solid #222;
+    font-size: 0.62rem; color: #666; letter-spacing: 0.05em; flex-shrink: 0;
+  }
+  .log-dot { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:0.25rem; }
+  .log-dot.info  { background: #555; }
+  .log-dot.ok    { background: var(--sage); }
+  .log-dot.warn  { background: #c9a227; }
+  .log-dot.error { background: #c0392b; }
+  .log-entries { flex:1; overflow-y:auto; padding:0.5rem 0; }
+  .log-entry {
+    display: grid; grid-template-columns: 54px 8px 1fr;
+    gap: 0 0.5rem; align-items: baseline;
+    padding: 0.28rem 1rem; font-size: 0.68rem; line-height: 1.45;
+    border-bottom: 1px solid #1a1a1a;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry.info  .log-entry-dot { background: #555; }
+  .log-entry.ok    .log-entry-dot { background: var(--sage); }
+  .log-entry.warn  .log-entry-dot { background: #c9a227; }
+  .log-entry.error .log-entry-dot { background: #c0392b; }
+  .log-entry.error .log-entry-msg { color: #e74c3c; }
+  .log-entry.warn  .log-entry-msg { color: #f0c040; }
+  .log-entry.ok    .log-entry-msg { color: #b8d8b0; }
+  .log-entry.info  .log-entry-msg { color: #888; }
+  .log-entry-time   { color: #444; font-size: 0.62rem; letter-spacing: 0.02em; }
+  .log-entry-dot    { width:7px; height:7px; border-radius:50%; flex-shrink:0; margin-top:0.3rem; }
+  .log-entry-msg    { color: #aaa; word-break: break-word; }
+  .log-entry-detail { grid-column:3; color:#555; font-size:0.62rem; margin-top:0.1rem; word-break:break-all; }
+  .log-section-divider {
+    padding: 0.5rem 1rem 0.25rem; font-size: 0.6rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: #333; border-top: 1px solid #222; margin-top: 0.25rem;
+  }
+
+  /* ── LOADING SUB-TEXT ── */
+  .loading-messages { display: flex; flex-direction: column; gap: 0.15rem; }
+  .loading-sub { font-family: 'DM Mono', monospace; font-size: 0.68rem; color: var(--ink); opacity: 0.55; letter-spacing: 0.04em; display: none; }
+  .loading-sub.visible { display: block; }
+
+  /* ── NOTIFICATION ── */
+  .notification {
+    position: fixed;
+    left: 352px;
+    bottom: 52px;
+    top: auto; right: auto;
+    width: min(420px, calc(100vw - 364px));
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.55rem 0.75rem;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    z-index: 9997;
+    transform: translateY(8px);
     opacity: 0;
-    transition: all 0.3s;
+    transition: opacity 0.3s, transform 0.3s;
     border-left: 3px solid var(--sage);
-    letter-spacing: 0.03em;
-    max-width: 300px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    pointer-events: none;
   }
   .notification.show { transform: translateY(0); opacity: 1; }
   .notification.error { border-left-color: var(--clay); }
@@ -1109,16 +1198,17 @@
     z-index: 9998;
     background: rgba(255, 255, 255, 0.96);
     border: 1px solid var(--rule);
-    border-left: 3px solid var(--clay);
+    border-left: 3px solid var(--sage);
     border-radius: 6px;
-    padding: 0.45rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    color: var(--text-secondary);
+    font-size: 0.75rem;
+    color: var(--ink);
+    letter-spacing: 0.06em;
     display: none;
     align-items: center;
-    gap: 0.5rem;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+    gap: 0.7rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
     pointer-events: none;
     width: min(420px, calc(100vw - 364px));
   }
@@ -1142,11 +1232,12 @@
 
   .loading-badge::before {
     content: '';
-    width: 12px; height: 12px;
+    width: 24px; height: 24px;
     border: 2px solid var(--rule);
-    border-top-color: var(--ink);
+    border-top-color: var(--sage);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
     display: inline-block;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -1236,7 +1327,10 @@
 <!-- Loading overlay -->
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-spinner"></div>
-  <div class="loading-text">Loading calendar data…</div>
+  <div class="loading-messages">
+    <div class="loading-text" id="loadingText">Loading…</div>
+    <div class="loading-sub" id="loadingSub"></div>
+  </div>
 </div>
 
 <!-- Notification toast -->
@@ -1249,6 +1343,9 @@
   </div>
   <div class="header-right">
     <div class="last-sync" id="lastSync">Not synced</div>
+    <button class="log-btn" id="logBtn" onclick="toggleLogPanel()" title="Show diagnostic log">
+      ≡ Log
+    </button>
     <button class="sync-btn" onclick="refreshData()" id="syncBtn">
       ↻ Refresh
     </button>
@@ -1423,6 +1520,80 @@
 </div>
 
 <script>
+// ═════════════════════════════════════════════════════════
+// DIAGNOSTIC LOG
+// ═════════════════════════════════════════════════════════
+const _logEntries = [];
+let   _logPanelOpen = false;
+
+function appLog(level, message, detail) {
+  const entry = { level, message, detail: detail || null, time: new Date() };
+  _logEntries.push(entry);
+  _renderLogEntry(entry);
+  _updateLogBtnState();
+}
+
+function _renderLogEntry(entry) {
+  const container = document.getElementById('logEntries');
+  if (!container) return;
+  const timeStr = entry.time.toTimeString().slice(0, 8);
+  const el = document.createElement('div');
+  el.className = `log-entry ${entry.level}`;
+  el.innerHTML =
+    `<span class="log-entry-time">${_escLog(timeStr)}</span>` +
+    `<span class="log-entry-dot"></span>` +
+    `<span class="log-entry-msg">${_escLog(entry.message)}</span>` +
+    (entry.detail ? `<span class="log-entry-detail">${_escLog(String(entry.detail))}</span>` : '');
+  container.appendChild(el);
+  if (container.scrollHeight - container.scrollTop < container.clientHeight + 80)
+    container.scrollTop = container.scrollHeight;
+}
+
+function _addLogDivider(label) {
+  const container = document.getElementById('logEntries');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = 'log-section-divider';
+  el.textContent = label;
+  container.appendChild(el);
+}
+
+function _escLog(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _updateLogBtnState() {
+  const btn = document.getElementById('logBtn');
+  if (!btn) return;
+  const hasErrors   = _logEntries.some(e => e.level === 'error');
+  const hasWarnings = _logEntries.some(e => e.level === 'warn');
+  btn.classList.toggle('has-errors',   hasErrors);
+  btn.classList.toggle('has-warnings', !hasErrors && hasWarnings);
+}
+
+function toggleLogPanel() {
+  _logPanelOpen = !_logPanelOpen;
+  const panel = document.getElementById('logPanel');
+  if (panel) panel.classList.toggle('open', _logPanelOpen);
+  const btn = document.getElementById('logBtn');
+  if (btn) {
+    btn.style.borderColor = _logPanelOpen ? 'var(--sage-light)' : '';
+    btn.style.color       = _logPanelOpen ? 'var(--sage-light)' : '';
+  }
+  if (_logPanelOpen) {
+    const c = document.getElementById('logEntries');
+    if (c) c.scrollTop = c.scrollHeight;
+  }
+}
+
+function clearLog() {
+  _logEntries.length = 0;
+  const c = document.getElementById('logEntries');
+  if (c) c.innerHTML = '';
+  const btn = document.getElementById('logBtn');
+  if (btn) { btn.classList.remove('has-errors','has-warnings'); btn.style.borderColor=''; btn.style.color=''; }
+}
+
 // ═══════════════════════════════════════════════════════════
 // CONFIGURATION — edit these to match your environment
 // ═══════════════════════════════════════════════════════════
@@ -1606,7 +1777,7 @@ function startLoadingSafetyTimer() {
   setTimeout(() => {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay && !overlay.classList.contains('hidden')) {
-      console.warn('Startup loading safety timer hid the overlay; background refresh may still be running.');
+      appLog('warn', 'Startup timer fired before refresh completed — overlay hidden early');
       showLoading(false);
       setSubLoadingMessage('Still refreshing live data in background…');
     }
@@ -1614,16 +1785,15 @@ function startLoadingSafetyTimer() {
 }
 
 function setMainLoadingMessage(message) {
-  const el = document.querySelector('#loadingOverlay .loading-text');
-  if (el) el.textContent = message || 'Loading calendar data…';
+  const el = document.getElementById('loadingText');
+  if (el) el.textContent = message || 'Loading…';
 }
 
 function setSubLoadingMessage(message) {
-  const badge = document.getElementById('loadingBadge');
-  const textEl = document.getElementById('loadingBadgeText');
-  if (!badge || !textEl) return;
-  textEl.textContent = message || '';
-  badge.classList.toggle('visible', Boolean(message));
+  const el = document.getElementById('loadingSub');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.toggle('visible', Boolean(message));
 }
 
 function clearSubLoadingMessage() {
@@ -2028,9 +2198,9 @@ async function resolveCurrentWeekLocationsInBackground(events) {
   const needed = getNeededProjectNos(targetEvents);
   if (!needed.length) return;
 
-  setMainLoadingMessage('Loading calendar data…');
-  setSubLoadingMessage(`Resolving current week locations: ${needed.length} project(s)…`);
-  setLoading(`Resolving current week locations: ${needed.length} project(s)…`, true);
+  setMainLoadingMessage('Locating projects…');
+  setSubLoadingMessage(`Looking up ${needed.length} project location${needed.length===1?'':'s'}…`);
+  setLoading('locating-projects', true);
 
   try {
     await ensureProjectLookupForEvents(targetEvents);
@@ -2039,10 +2209,10 @@ async function resolveCurrentWeekLocationsInBackground(events) {
     renderAll();
     showNotification('Current week locations loaded', 'ok');
   } catch (e) {
-    console.error('Background location resolve failed', e);
+    appLog('error', 'Background project location resolve failed', e.message);
     showNotification('Calendar loaded, but locations failed to resolve', 'error');
   } finally {
-    setLoading(`Resolving current week locations: ${needed.length} project(s)…`, false);
+    setLoading('locating-projects', false);
     clearSubLoadingMessage();
   }
 }
@@ -2051,10 +2221,14 @@ async function refreshData() {
   const btn = document.getElementById('syncBtn');
   btn.classList.add('syncing');
   btn.textContent = '↻ Syncing…';
-  await loadData();
+  // Skip the cache — go straight to live Outlook/workbook data.
+  _eventsCacheReady = false;
+  _loadedWeekEvents = {};
+  _vehicleBookingsByWeek = {};
+  projectLookup = {};
+  await refreshFromLiveSourcesInBackground();
   btn.classList.remove('syncing');
   btn.textContent = '↻ Refresh';
-  document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 }
 
 // ── Project location lookup/cache ──────────────────────────
@@ -2116,7 +2290,7 @@ async function loadWorkbookRowsOnce() {
       _workbookRowsCache = range.values || [];
       return _workbookRowsCache;
     } catch(e) {
-      console.error('Workbook lookup failed', e);
+      appLog('error', 'Workbook lookup failed', e.message);
       showNotification('Could not load Won Projects workbook', 'error');
       return [];
     } finally {
@@ -2185,7 +2359,7 @@ async function ensureProjectLookupForEvents(events, forceRefresh = false) {
           return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
         });
     if (missing.length) {
-      console.log(forceRefresh ? 'Live refresh: re-reading workbook for:' : 'Locations missing from cache; checking workbook:', missing);
+      appLog('info', (forceRefresh ? 'Workbook: re-reading for projects: ' : 'Workbook: checking missing locations for: ') + missing.join(', '));
       await lookupMissingProjectsFromWorkbook(missing);
     }
     events.forEach(e => enrichEventFromLookup(e, projectLookup));
@@ -2233,7 +2407,7 @@ async function resolvePostcodesBulk(postcodes) {
         });
       }
     } catch(e) {
-      console.warn('Postcode batch failed', e);
+      appLog('warn', 'Postcode geocoding batch failed', e.message);
     }
   }
   return out;
@@ -2298,7 +2472,7 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
       .filter(Boolean);
   } catch(e) {
     _failedMailboxes.add(staff.email);
-    console.warn('Calendar failed for', staff.name, staff.email, e);
+    appLog('warn', `Outlook: calendar unavailable for ${staff.name}`, e.message);
     return [];
   }
 }
@@ -2309,9 +2483,9 @@ function logCalendarDebug(events) {
   const todaySurveys = todayEvents.filter(e => isSurveyType(e.type));
 
   console.groupCollapsed(`Calendar debug — ${todaySurveys.length} survey/site visits today, ${events.length} loaded events total`);
-  console.log('staffList count:', staffList.length, staffList);
-  console.log('activeStaff count:', activeStaff.size, [...activeStaff]);
-  console.log('failed mailboxes:', [..._failedMailboxes]);
+  appLog('info', `Outlook: fetching calendars for ${staffList.length} staff member(s)`);
+  
+  
   console.table(todayEvents.map(e => ({
     person: e.person,
     date: e.date,
@@ -2371,7 +2545,7 @@ async function fetchAllStaffCalendars(forceRefresh = false) {
     logCalendarDebug(allEvents);
 
     if (_failedMailboxes.size > 0) {
-      console.warn('Could not read calendars for:', [..._failedMailboxes]);
+      if (_failedMailboxes.size) appLog('warn', `Outlook: ${_failedMailboxes.size} mailbox(es) could not be read`, [..._failedMailboxes].join(', '));
       showNotification(`Could not read ${_failedMailboxes.size} calendar(s) — check console`, 'error');
     }
     return allEvents;
@@ -2425,10 +2599,10 @@ async function fetchWonProjectsCache() {
       };
     });
 
-    console.log(`Loaded ${Object.keys(projectLookup).length} project location(s) from ${CONFIG.projectLocationCacheListName}`);
+    appLog('ok', `Cache: loaded ${Object.keys(projectLookup).length} project location(s) from WonProjectsCache`);
     return projectLookup;
   } catch (e) {
-    console.warn('WonProjectsCache unavailable:', e.message);
+    appLog('warn', 'WonProjectsCache unavailable', e.message);
     return projectLookup;
   }
 }
@@ -2443,18 +2617,20 @@ async function fetchCalendarCacheFromSharePoint() {
       .map(item => mapEventItem(item, projectLookup))
       .filter(e => e.date && eventFallsInCurrentWeek(e));
 
-    console.log(`Loaded ${events.length} cached event(s) from ${CONFIG.calendarListName}`);
+    appLog('ok', `Cache: loaded ${events.length} calendar event(s) from StaffCalendarCache`);
     return events;
   } catch (e) {
-    console.warn('StaffCalendarCache unavailable:', e.message);
+    appLog('warn', 'StaffCalendarCache unavailable', e.message);
     return [];
   }
 }
 
 async function fetchCachedDataFirst() {
-  setMainLoadingMessage('Loading cached calendar data…');
-  setSubLoadingMessage('Reading SharePoint cache lists…');
-  setLoading('Reading SharePoint cache…', true);
+  _addLogDivider('Cache load');
+  appLog('info', 'Reading SharePoint cache lists…');
+  setMainLoadingMessage('Loading calendars…');
+  setSubLoadingMessage('Reading cached data…');
+  setLoading('reading-cache', true);
   try {
     await fetchWonProjectsCache();
     const cachedEvents = await fetchCalendarCacheFromSharePoint();
@@ -2463,21 +2639,26 @@ async function fetchCachedDataFirst() {
     _loadedWeekEvents[weekKey] = cachedEvents;
     allEvents = Object.values(_loadedWeekEvents).flat();
     _eventsCacheReady = true;
+    // Render immediately so cached data is visible before live refresh starts.
+    buildStaffFilter();
+    renderAll();
     return cachedEvents;
   } catch (e) {
-    console.warn('Cache read failed:', e.message);
+    appLog('error', 'Cache load failed — will fall back to live refresh', e.message);
     const weekKey = getWeekKey(currentWeekStart);
     _loadedWeekEvents[weekKey] = [];
     allEvents = Object.values(_loadedWeekEvents).flat();
     return [];
   } finally {
-    setLoading('Reading SharePoint cache…', false);
+    setLoading('reading-cache', false);
   }
 }
 
 async function refreshFromLiveSourcesInBackground() {
-  setSubLoadingMessage('Refreshing live Outlook/workbook data in background…');
-  setLoading('Refreshing live data in background…', true);
+  _addLogDivider('Live refresh');
+  appLog('info', 'Starting live refresh from Outlook and workbook…');
+  setSubLoadingMessage('Syncing live data from Outlook…');
+  setLoading('live-refresh', true);
   try {
     const freshEvents = await fetchAllStaffCalendars(true);
     await ensureProjectLookupForEvents(freshEvents, true);
@@ -2494,13 +2675,15 @@ async function refreshFromLiveSourcesInBackground() {
     upsertCalendarCacheItems(weekEvents);
     upsertWonProjectsCacheItems(weekEvents);
 
+    appLog('ok', 'Live refresh complete — display updated');
     document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+    appLog('ok', 'Live refresh complete — display updated');
     if (CONFIG.backgroundRefreshMessage) showNotification('Live calendar data refreshed', 'ok');
   } catch (e) {
-    console.warn('Live background refresh failed:', e);
-    showNotification('Cached view opened, but live refresh failed', 'error');
+    appLog('error', 'Live refresh failed', e.message);
+    showNotification('Live refresh failed', 'error');
   } finally {
-    setLoading('Refreshing live data in background…', false);
+    setLoading('live-refresh', false);
     clearSubLoadingMessage();
   }
 }
@@ -2541,10 +2724,10 @@ async function upsertCalendarCacheItems(events) {
         } else {
           await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) { console.warn('StaffCalendarCache write failed:', inner.message, fields.Title); }
+      } catch (inner) { appLog('warn', `StaffCalendarCache: failed to write “${fields.Title}”`, inner.message); }
     }
-    console.log(`StaffCalendarCache updated: ${(events || []).length} event(s)`);
-  } catch (e) { console.warn('StaffCalendarCache update skipped:', e.message); }
+    appLog('ok', `Cache write: StaffCalendarCache — ${(events || []).length} event(s) upserted`);
+  } catch (e) { appLog('error', 'StaffCalendarCache write-back failed', e.message); }
 }
 
 async function upsertWonProjectsCacheItems(events) {
@@ -2582,10 +2765,10 @@ async function upsertWonProjectsCacheItems(events) {
         } else {
           await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) { console.warn('WonProjectsCache write failed:', inner.message, e.projectNo); }
+      } catch (inner) { appLog('warn', `WonProjectsCache: failed to write project ${e.projectNo}`, inner.message); }
     }
-    console.log(`WonProjectsCache updated: ${seen.size} project(s)`);
-  } catch (e) { console.warn('WonProjectsCache update skipped:', e.message); }
+    appLog('ok', `Cache write: WonProjectsCache — ${seen.size} project location(s) upserted`);
+  } catch (e) { appLog('error', 'WonProjectsCache write-back failed', e.message); }
 }
 
 async function fetchSharePointData() {
@@ -2595,7 +2778,7 @@ async function fetchSharePointData() {
       setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
       return allEvents;
     } catch (e) {
-      console.warn('Cache-first load failed; rendering empty app and refreshing live in background:', e.message);
+      appLog('error', 'Cache load failed — falling back to live refresh', e.message);
       allEvents = [];
       setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
       return allEvents;
@@ -2686,7 +2869,7 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
-    console.warn('Vehicle bookings unavailable:', e.message);
+    appLog('warn', 'Vehicle bookings calendar unavailable', e.message);
     _vehicleBookingsByWeek[weekKey] = [];
     return _vehicleBookingsByWeek[weekKey];
   }
@@ -3968,13 +4151,22 @@ function showLoading(show) {
 }
 
 const _loadingTasks = new Set();
+const _loadingLabels = {
+  'loading-calendars': 'Loading calendars…',
+  'reading-cache':     'Loading calendars…',
+  'loading-locations': 'Locating projects…',
+  'locating-projects': 'Locating projects…',
+  'checking-workbook': 'Checking project workbook…',
+  'live-refresh':      'Syncing live data…',
+};
 function setLoading(name, on) {
   if (on) _loadingTasks.add(name);
   else    _loadingTasks.delete(name);
   const badge = document.getElementById('loadingBadge');
   const text  = document.getElementById('loadingBadgeText');
   if (_loadingTasks.size > 0) {
-    text.textContent = [..._loadingTasks][0];
+    const label = _loadingLabels[[..._loadingTasks][0]] || [..._loadingTasks][0];
+    text.textContent = label;
     badge.classList.add('visible');
   } else {
     badge.classList.remove('visible');
@@ -3988,5 +4180,22 @@ function showNotification(msg, type='ok') {
   setTimeout(() => el.classList.remove('show'), 3500);
 }
 </script>
+<!-- ── Diagnostic Log Panel ───────────────────────────────────────── -->
+<div id="logPanel" class="log-panel">
+  <div class="log-panel-header">
+    <span class="log-panel-title">Diagnostic Log</span>
+    <div class="log-panel-actions">
+      <button class="log-clear-btn" onclick="clearLog()">Clear</button>
+      <button class="log-close-btn" onclick="toggleLogPanel()">×</button>
+    </div>
+  </div>
+  <div class="log-panel-legend">
+    <span class="log-dot info"></span>Info
+    <span class="log-dot ok"></span>Success
+    <span class="log-dot warn"></span>Warning
+    <span class="log-dot error"></span>Error
+  </div>
+  <div class="log-entries" id="logEntries"></div>
+</div>
 </body>
 </html>
