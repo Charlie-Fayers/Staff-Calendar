@@ -1537,11 +1537,7 @@ async function graphPost(path, body) {
   if (!token) return null;
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
   if (!res.ok) throw new Error(`Graph POST ${res.status}: ${await res.text()}`);
@@ -1553,11 +1549,7 @@ async function graphPatch(path, body) {
   if (!token) return null;
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     method: 'PATCH',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
   if (!res.ok) throw new Error(`Graph PATCH ${res.status}: ${await res.text()}`);
@@ -2182,30 +2174,20 @@ async function ensureProjectLookupForEvents(events, forceRefresh = false) {
 
   setLoading('Loading current week locations…', true);
   try {
-    // On a forced live refresh, clear the in-memory workbook cache so changed
-    // postcodes in the Excel file are picked up fresh from the Graph API.
     if (forceRefresh) {
       _workbookRowsCache = null;
       _workbookLoading = null;
     }
-
-    // Always re-fetch from workbook on a force refresh; otherwise only fetch
-    // projects that are genuinely missing coordinates.
-    let missing = forceRefresh
+    const missing = forceRefresh
       ? needed
       : needed.filter(n => {
           const loc = projectLookup[n];
           return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
         });
-
     if (missing.length) {
-      console.log(
-        forceRefresh ? 'Live refresh: re-reading workbook for projects:' : 'Project locations missing from cache; checking workbook:',
-        missing
-      );
+      console.log(forceRefresh ? 'Live refresh: re-reading workbook for:' : 'Locations missing from cache; checking workbook:', missing);
       await lookupMissingProjectsFromWorkbook(missing);
     }
-
     events.forEach(e => enrichEventFromLookup(e, projectLookup));
     return projectLookup;
   } finally {
@@ -2428,19 +2410,18 @@ async function fetchWonProjectsCache() {
       const projectNo = normaliseProjectNo(f.Title || f.ProjectNumber || '');
       if (!projectNo) return;
 
-      // SharePoint replaces spaces in column names with _x0020_ internally.
-      // "Nearest Postcode" becomes "Nearest_x0020_Postcode" in the Graph API.
       const postcode = String(
         f['Nearest_x0020_Postcode'] || f.Postcode || f.PostCode || ''
       ).trim();
+      const postcodeOk = isValidPostcode(postcode);
       projectLookup[projectNo] = {
         projectNo,
-        site:     String(f.Site || f.ProjectName || f.SiteName || '').trim(),
-        town:     String(f.Town || '').trim(),
-        county:   String(f.County || '').trim(),
+        site:    String(f.Site || f.ProjectName || f.SiteName || '').trim(),
+        town:    String(f.Town || '').trim(),
+        county:  String(f.County || '').trim(),
         postcode,
-        lat:      f.Latitude  != null && f.Latitude  !== '' ? Number(f.Latitude)  : null,
-        lng:      f.Longitude != null && f.Longitude !== '' ? Number(f.Longitude) : null,
+        lat: postcodeOk && f.Latitude  != null && f.Latitude  !== '' ? Number(f.Latitude)  : null,
+        lng: postcodeOk && f.Longitude != null && f.Longitude !== '' ? Number(f.Longitude) : null,
       };
     });
 
@@ -2509,7 +2490,6 @@ async function refreshFromLiveSourcesInBackground() {
     buildStaffFilter();
     renderAll();
 
-    // Write fresh data back to the SharePoint cache lists (best-effort).
     const weekEvents = _loadedWeekEvents[weekKey] || [];
     upsertCalendarCacheItems(weekEvents);
     upsertWonProjectsCacheItems(weekEvents);
@@ -2524,13 +2504,10 @@ async function refreshFromLiveSourcesInBackground() {
   }
 }
 
-// ── Cache write-back ────────────────────────────────────────
-// Writes live Outlook events to StaffCalendarCache (upsert by OutlookEventId).
 async function upsertCalendarCacheItems(events) {
   try {
     const listId = await getListId(CONFIG.calendarListName);
     const now = new Date().toISOString();
-
     const existing = await graphFetchPaged(
       `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
     );
@@ -2539,54 +2516,39 @@ async function upsertCalendarCacheItems(events) {
       const oid = (item.fields || {}).OutlookEventId;
       if (oid) existingByOutlookId[oid] = item.id;
     });
-
     for (const e of (events || [])) {
       if (!e || !e.date) continue;
       const fields = {
-        Title:          String(e.title || `${e.person || ''} ${e.date || ''}`),
-        StaffName:      String(e.person || ''),
-        StaffEmail:     String(e.staffEmail || e.email || ''),
-        EventDate:      String(e.startISO || e.date),
-        EventEnd:       String(e.endISO || e.date),
-        ProjectNumber:  String(e.projectNo || ''),
-        EventType:      String(e.type || ''),
-        Town:           String(e.town || ''),
-        County:         String(e.county || ''),
-        Latitude:       Number.isFinite(Number(e.lat)) ? Number(e.lat) : null,
-        Longitude:      Number.isFinite(Number(e.lng)) ? Number(e.lng) : null,
+        Title: String(e.title || `${e.person || ''} ${e.date || ''}`),
+        StaffName: String(e.person || ''),
+        StaffEmail: String(e.staffEmail || e.email || ''),
+        EventDate: String(e.startISO || e.date),
+        EventEnd: String(e.endISO || e.date),
+        ProjectNumber: String(e.projectNo || ''),
+        EventType: String(e.type || ''),
+        Town: String(e.town || ''),
+        County: String(e.county || ''),
+        Latitude: Number.isFinite(Number(e.lat)) ? Number(e.lat) : null,
+        Longitude: Number.isFinite(Number(e.lng)) ? Number(e.lng) : null,
         OutlookEventId: String(e.outlookEventId || e.id || ''),
-        LastSynced:     now,
+        LastSynced: now,
       };
       const oid = fields.OutlookEventId;
       try {
         if (oid && existingByOutlookId[oid]) {
-          await graphPatch(
-            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByOutlookId[oid]}/fields`,
-            fields
-          );
+          await graphPatch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByOutlookId[oid]}/fields`, fields);
         } else {
-          await graphPost(
-            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
-            { fields }
-          );
+          await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) {
-        console.warn('StaffCalendarCache write failed:', inner.message, fields.Title);
-      }
+      } catch (inner) { console.warn('StaffCalendarCache write failed:', inner.message, fields.Title); }
     }
     console.log(`StaffCalendarCache updated: ${(events || []).length} event(s)`);
-  } catch (e) {
-    console.warn('StaffCalendarCache update skipped:', e.message);
-  }
+  } catch (e) { console.warn('StaffCalendarCache update skipped:', e.message); }
 }
 
-// Writes resolved project locations to WonProjectsCache (upsert by project number).
-// Also stores the geocoded lat/lng and the postcode so future cache-first loads
-// can skip the workbook entirely.
 async function upsertWonProjectsCacheItems(events) {
   try {
     const listId = await getListId(CONFIG.projectLocationCacheListName);
-
     const existing = await graphFetchPaged(
       `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
     );
@@ -2596,44 +2558,33 @@ async function upsertWonProjectsCacheItems(events) {
       const proj = normaliseProjectNo(f.Title || f.ProjectNumber || '');
       if (proj) existingByProjectNo[proj] = item.id;
     });
-
     const seen = new Set();
     for (const e of (events || [])) {
       if (!e || !e.projectNo || seen.has(e.projectNo)) continue;
       seen.add(e.projectNo);
       const loc = projectLookup[e.projectNo];
       if (!loc) continue;
+      const postcodeOk = isValidPostcode(loc.postcode);
       const fields = {
-        Title:                     String(e.projectNo),
-        ProjectNumber:             String(e.projectNo),
-        Site:                      String(loc.site || ''),
-        Town:                      String(loc.town || ''),
-        County:                    String(loc.county || ''),
-        // Write postcode back to the same column name the list uses.
-        'Nearest_x0020_Postcode':  String(loc.postcode || ''),
-        Latitude:  loc.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
-        Longitude: loc.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
+        Title: String(e.projectNo),
+        ProjectNumber: String(e.projectNo),
+        Site: String(loc.site || ''),
+        Town: String(loc.town || ''),
+        County: String(loc.county || ''),
+        'Nearest_x0020_Postcode': String(loc.postcode || ''),
+        Latitude:  postcodeOk && loc.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
+        Longitude: postcodeOk && loc.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
       };
       try {
         if (existingByProjectNo[e.projectNo]) {
-          await graphPatch(
-            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByProjectNo[e.projectNo]}/fields`,
-            fields
-          );
+          await graphPatch(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByProjectNo[e.projectNo]}/fields`, fields);
         } else {
-          await graphPost(
-            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
-            { fields }
-          );
+          await graphPost(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`, { fields });
         }
-      } catch (inner) {
-        console.warn('WonProjectsCache write failed:', inner.message, e.projectNo);
-      }
+      } catch (inner) { console.warn('WonProjectsCache write failed:', inner.message, e.projectNo); }
     }
     console.log(`WonProjectsCache updated: ${seen.size} project(s)`);
-  } catch (e) {
-    console.warn('WonProjectsCache update skipped:', e.message);
-  }
+  } catch (e) { console.warn('WonProjectsCache update skipped:', e.message); }
 }
 
 async function fetchSharePointData() {
@@ -2691,7 +2642,7 @@ function mapEventItem(item, lookup) {
     lat,
     lng,
     type:      f.EventType || 'Field survey',
-    vehicle:   '',
+    vehicle:   f.Vehicle || '',
     outlookEventId: f.OutlookEventId || '',
     lastSynced: f.LastSynced || '',
     _projInLookup:    !!enriched,
@@ -2721,20 +2672,16 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
     const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
     const data = await graphFetchPaged(path);
-
     const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
       const vehicleFromCategory = extractVehicleName(ev.categories || []);
       return {
-        title:     subject,
-        vehicle:   vehicleFromCategory,
-        projectNo: extractProjectNo(subject),
-        initials:  extractInitialsTokens(subject),
-        start:     ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
-        end:       ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
+        title:   subject,
+        vehicle: vehicleFromCategory,
+        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
-
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
@@ -2745,41 +2692,6 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
 }
 
 // Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
-
-function extractInitialsTokens(str) {
-  // Pull two-to-four letter initials from vehicle booking titles, including
-  // entries such as "Ranger - PK/FB" or "Suzi - Bluefield site (SR)".
-  const tokens = (str || '').toUpperCase().match(/\b[A-Z]{2,4}\b/g) || [];
-  return new Set(tokens);
-}
-
-function staffInitialsMatchBooking(staffName, booking) {
-  const initials = initialsForName(staffName || '').map(i => (i || '').toUpperCase()).filter(Boolean);
-  if (!initials.length || !booking.initials) return false;
-  return initials.some(i => booking.initials.has(i));
-}
-
-function bookingOverlapsEvent(booking, event) {
-  if (!booking || !event) return false;
-
-  // Prefer actual event start/end if present; otherwise use the calendar day.
-  const start = event.startISO ? new Date(event.startISO) : new Date(event.date);
-  const end = event.endISO ? new Date(event.endISO) : new Date(event.date);
-  if (isNaN(start) || isNaN(end)) return false;
-
-  if (!event.startISO) start.setHours(0, 0, 0, 0);
-  if (!event.endISO) end.setHours(23, 59, 59, 999);
-
-  return booking.start <= end && booking.end >= start;
-}
-
-function bookingProjectMatchesEvent(booking, event) {
-  const eventProject = event.projectNo || extractProjectNo(event.title || '');
-  const bookingProject = booking.projectNo || extractProjectNo(booking.title || '');
-  return Boolean(eventProject && bookingProject && eventProject === bookingProject);
-}
-
-
 function initialsForName(name) {
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
@@ -2791,55 +2703,66 @@ function initialsForName(name) {
 }
 
 function attachVehicles(events, bookings) {
-  // Always clear previous/stale assignments before re-matching.
-  events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
-  if (!bookings || !bookings.length) return;
+  if (!bookings || !bookings.length) {
+    // Still clear any vehicle values set from Outlook event categories.
+    events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
+    return;
+  }
 
-  // Group by project/date so that if a booking is confidently matched to one
-  // attendee on a shared site visit, that same vehicle is shown for the whole
-  // site visit group.
+  // Clear all vehicle assignments on survey events before re-computing.
+  // This overrides any vehicle that may have been copied from the staff
+  // member's own Outlook event categories or from the SharePoint cache.
+  events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
+
+  // Group survey events by project+date. People with no project number are
+  // grouped by a normalised title (lowercased, punctuation stripped) so that
+  // minor wording differences between two people's calendar entries for the
+  // same site still land in the same group.
   const groups = new Map();
   events.forEach(e => {
     if (!isSurveyType(e.type) || !e.date) return;
-    const projKey = e.projectNo || extractProjectNo(e.title || '') || `${e.lat || ''},${e.lng || ''}` || e.title;
+    const projKey = e.projectNo
+      ? e.projectNo
+      : (e.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 40);
     const key = `${e.date}|${projKey}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(e);
   });
 
   groups.forEach(group => {
-    // Only consider vehicle bookings overlapping at least one event in the group.
-    const overlapping = bookings.filter(b => group.some(e => bookingOverlapsEvent(b, e)));
-    if (!overlapping.length) return;
+    const e0 = group[0];
+    const eventDate = new Date(e0.date);
+    if (isNaN(eventDate)) return;
 
-    // 1. Best signal: booking initials match one of the staff in this group.
-    // This prevents "SR" being applied to Paul Kennedy just because it is on the same day.
-    const initialMatches = overlapping.filter(b =>
-      group.some(e => staffInitialsMatchBooking(e.person, b))
-    );
+    const evDayStart = new Date(eventDate); evDayStart.setHours(0, 0, 0, 0);
+    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23, 59, 59, 999);
 
-    const initialVehicles = [...new Set(initialMatches.map(b => b.vehicle).filter(Boolean))];
-    if (initialVehicles.length === 1) {
-      group.forEach(e => { e.vehicle = initialVehicles[0]; });
-      return;
-    }
-    if (initialVehicles.length > 1) {
-      // More than one possible vehicle from initials: do not guess.
-      return;
-    }
+    const dayBookings = bookings.filter(b => b.start <= evDayEnd && b.end >= evDayStart);
+    if (!dayBookings.length) return;
 
-    // 2. Fallback only if a project code appears in both the staff event and the vehicle booking.
-    const projectMatches = overlapping.filter(b =>
-      group.some(e => bookingProjectMatchesEvent(b, e))
-    );
+    // Collect all initials tokens for everyone in the group.
+    const allInitials = group.flatMap(e => initialsForName(e.person));
 
-    const projectVehicles = [...new Set(projectMatches.map(b => b.vehicle).filter(Boolean))];
-    if (projectVehicles.length === 1) {
-      group.forEach(e => { e.vehicle = projectVehicles[0]; });
+    // 1. Initials match — most confident signal; assign to the whole group.
+    const initialsMatch = dayBookings.find(b => {
+      const upper = b.title.toUpperCase();
+      return allInitials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
+    });
+    if (initialsMatch) {
+      group.forEach(e => { e.vehicle = initialsMatch.vehicle; });
       return;
     }
 
-    // 3. Ambiguous/no confident match: leave vehicle blank.
+    // 2. Single booking whose subject contains the project number.
+    if (dayBookings.length === 1 && e0.projectNo) {
+      const projPattern = new RegExp(`\\b0?${e0.projectNo}\\b`);
+      if (projPattern.test(dayBookings[0].title)) {
+        group.forEach(e => { e.vehicle = dayBookings[0].vehicle; });
+      }
+      return;
+    }
+
+    // 3. Ambiguous or no confident match → leave blank (staff may use own cars).
   });
 }
 
@@ -2949,7 +2872,7 @@ function renderSidebar() {
           <div class="event-person" style="color:${color}">${e.person}</div>
           <div class="event-title">${e.title}</div>
           <div class="event-meta">${projBadge}${locTag}<span class="type-tag">${e.type}</span>
-              ${e.vehicle ? `<span class="vehicle-tag">🚙 ${e.vehicle}</span>` : ''}${vehTag}${warnTag}</div>
+              ${vehTag}${warnTag}</div>
         </div>
       </div>`;
     });
