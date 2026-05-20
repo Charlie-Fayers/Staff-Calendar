@@ -1027,21 +1027,28 @@
   /* ── LOADING OVERLAY ── */
   .loading-overlay {
     position: fixed;
-    inset: 0;
-    background: rgba(245,242,235,0.85);
-    backdrop-filter: blur(4px);
+    top: 72px;
+    right: 1rem;
+    inset: auto 1rem auto auto;
+    background: rgba(255,255,255,0.95);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--sage);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
     z-index: 9999;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
-    transition: opacity 0.3s;
+    gap: 0.75rem;
+    transition: opacity 0.3s, transform 0.3s;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    pointer-events: none; /* keep the rest of the app usable while loading */
   }
-  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-overlay.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
   .loading-spinner {
-    width: 40px;
-    height: 40px;
+    width: 24px;
+    height: 24px;
     border: 2px solid var(--rule);
     border-top-color: var(--sage);
     border-radius: 50%;
@@ -1051,7 +1058,7 @@
   .loading-text {
     font-family: 'DM Mono', monospace;
     font-size: 0.75rem;
-    color: var(--text-secondary);
+    color: var(--ink);
     letter-spacing: 0.06em;
   }
 
@@ -1112,6 +1119,18 @@
     pointer-events: none;
   }
   .loading-badge.visible { display: inline-flex; }
+
+  @media (max-width: 600px) {
+    .loading-overlay {
+      top: auto;
+      left: 0.75rem;
+      right: 0.75rem;
+      bottom: 0.75rem;
+      width: auto;
+      justify-content: flex-start;
+    }
+  }
+
   .loading-badge::before {
     content: '';
     width: 12px; height: 12px;
