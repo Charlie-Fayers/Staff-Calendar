@@ -1558,6 +1558,13 @@ const DEMO_EVENTS = [
   { id:20,person:'Charlie D',date:'2026-05-15', projectNo:'9515', title:'MEETING – 9515 Unity Holidays client',  town:'Brean',            county:'Somerset',             lat:51.2790, lng:-3.0085, type:'Meeting' },
 ];
 
+
+// Speed approach:
+// 1. Load calendar events for the selected/current week first.
+// 2. Extract only the project numbers used by those events.
+// 3. Read/resolve locations only for those project numbers.
+// SharePoint project-location cache is intentionally disabled for now.
+
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
@@ -1916,19 +1923,84 @@ async function refreshData() {
   document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 }
 
-// ── Won Projects workbook (read once per session) ─────────
-let projectLookup = null;   // { '1234': { site, town, county, postcode, lat, lng } }
+// ── Project location lookup/cache ──────────────────────────
+// Fast path: read coordinates from a small SharePoint list first, then only fall
+// back to the Won Projects workbook for the project numbers that are actually
+// needed for the loaded week. This avoids loading/geocoding every project at
+// initial page load.
+let projectLookup = {};      // { '1234': { site, town, county, postcode, lat, lng } }
+let _workbookRowsCache = null;
 let _workbookLoading = null;
+let _spLocationCacheLoaded = false;
+let _spLocationCacheByProject = {};
 
-async function ensureProjectLookup() {
-  if (projectLookup) return projectLookup;
+function normaliseProjectNo(v) {
+  let num = ('' + (v || '')).trim();
+  if (/^\d+\.0$/.test(num)) num = num.slice(0, -2);
+  const m = num.match(/\b(\d{4,6})\b/);
+  return m ? m[1] : num;
+}
+
+function getNeededProjectNos(events) {
+  return [...new Set(
+    (events || [])
+      .filter(e => e && isSurveyType(e.type))
+      .map(e => normaliseProjectNo(e.projectNo || extractProjectNo(e.title)))
+      .filter(Boolean)
+  )];
+}
+
+function mapCacheFieldsToLocation(fields) {
+  if (!fields) return null;
+  const projectNo = normaliseProjectNo(fields.Title || fields.ProjectNumber || fields.ProjectNo);
+  if (!projectNo) return null;
+  const lat = parseFloat(fields.Latitude);
+  const lng = parseFloat(fields.Longitude);
+  return {
+    projectNo,
+    site:     String(fields.Site || fields.SiteName || ''),
+    town:     String(fields.Town || ''),
+    county:   String(fields.County || ''),
+    postcode: String(fields.Postcode || ''),
+    lat:      Number.isFinite(lat) ? lat : null,
+    lng:      Number.isFinite(lng) ? lng : null,
+    cacheItemId: fields.id || null,
+  };
+}
+
+
+
+async function saveProjectLocationsToCache(locations) {
+  const valid = (locations || []).filter(l => l && l.projectNo && Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)));
+  if (!valid.length) return;
+  try {
+    const listId = await getListId(CONFIG.projectLocationCacheListName);
+    await Promise.all(valid.map(loc => graphMutate('POST',
+      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items`,
+      { fields: {
+        Title:     String(loc.projectNo),
+        Site:      loc.site || '',
+        Town:      loc.town || '',
+        County:    loc.county || '',
+        Postcode:  loc.postcode || '',
+        Latitude:  String(loc.lat),
+        Longitude: String(loc.lng),
+        LastUpdated: new Date().toISOString(),
+      }}
+    ).catch(e => console.warn('Could not write project location cache item', loc.projectNo, e))));
+  } catch(e) {
+    console.warn('Could not save project locations to SharePoint cache', e);
+  }
+}
+
+async function loadWorkbookRowsOnce() {
+  if (_workbookRowsCache) return _workbookRowsCache;
   if (_workbookLoading) return _workbookLoading;
   _workbookLoading = (async () => {
-    setLoading('Loading project locations…', true);
+    setLoading('Checking Won Projects workbook…', true);
     try {
       const site = await graphFetch(`/sites/${CONFIG.workbookSitePath}`);
-      if (!site) return {};
-      // List all drives on the site and search each for the workbook
+      if (!site) return [];
       const drivesRes = await graphFetch(`/sites/${site.id}/drives`);
       const drives = drivesRes.value || [];
       let file = null, driveId = null;
@@ -1936,64 +2008,97 @@ async function ensureProjectLookup() {
         try {
           const search = await graphFetch(`/drives/${d.id}/root/search(q='${encodeURIComponent(CONFIG.workbookName)}')`);
           const match = (search.value || []).find(f => f.name === CONFIG.workbookName);
-          if (match) {
-            file = match;
-            driveId = d.id;
-            console.log(`Found workbook in drive "${d.name}"`);
-            break;
-          }
+          if (match) { file = match; driveId = d.id; break; }
         } catch(e) { console.warn(`Search in drive "${d.name}" failed`, e); }
       }
       if (!file) {
         showNotification('Won Projects workbook not found on Data site', 'error');
-        return {};
+        return [];
       }
-      // Used range from the named sheet
       const sheet = encodeURIComponent(CONFIG.workbookSheet);
       const range = await graphFetch(`/drives/${driveId}/items/${file.id}/workbook/worksheets('${sheet}')/usedRange(valuesOnly=true)`);
-      const rows = range.values || [];
-      const lookup = {};
-      const postcodes = new Set();
-      for (let i = 1; i < rows.length; i++) {
-        const r = rows[i];
-        if (!r) continue;
-        let num = ('' + (r[CONFIG.colProject] || '')).trim();
-        if (/^\d+\.0$/.test(num)) num = num.slice(0, -2);
-        if (!num) continue;
-        const postcode = ('' + (r[CONFIG.colPostcode] || '')).trim();
-        lookup[num] = {
-          site:     ('' + (r[CONFIG.colSite]   || '')).trim(),
-          town:     ('' + (r[CONFIG.colTown]   || '')).trim(),
-          county:   ('' + (r[CONFIG.colCounty] || '')).trim(),
-          postcode: postcode,
-          lat: null, lng: null,
-        };
-        if (isValidPostcode(postcode)) postcodes.add(postcode);
-      }
-      // Bulk-resolve all postcodes
-      const pcCoords = await resolvePostcodesBulk([...postcodes]);
-      for (const num in lookup) {
-        const pc = lookup[num].postcode;
-        if (!pc) continue;
-        const key = pc.replace(/\s+/g, '').toUpperCase();
-        if (pcCoords[key]) {
-          lookup[num].lat = pcCoords[key].lat;
-          lookup[num].lng = pcCoords[key].lng;
-        }
-      }
-      projectLookup = lookup;
-      console.log(`Loaded ${Object.keys(lookup).length} projects, ${Object.values(lookup).filter(p => p.lat).length} geocoded`);
-      return lookup;
+      _workbookRowsCache = range.values || [];
+      return _workbookRowsCache;
     } catch(e) {
-      console.error('Workbook load failed', e);
+      console.error('Workbook lookup failed', e);
       showNotification('Could not load Won Projects workbook', 'error');
-      projectLookup = {};
-      return {};
+      return [];
     } finally {
-      setLoading('Loading project locations…', false);
+      setLoading('Checking Won Projects workbook…', false);
     }
   })();
   return _workbookLoading;
+}
+
+async function lookupMissingProjectsFromWorkbook(projectNos) {
+  const needed = new Set((projectNos || []).map(normaliseProjectNo).filter(Boolean));
+  const out = {};
+  if (!needed.size) return out;
+
+  const rows = await loadWorkbookRowsOnce();
+  const postcodes = new Set();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const num = normaliseProjectNo(r[CONFIG.colProject]);
+    if (!needed.has(num)) continue;
+    const postcode = String(r[CONFIG.colPostcode] || '').trim();
+    out[num] = {
+      projectNo: num,
+      site:     String(r[CONFIG.colSite]   || '').trim(),
+      town:     String(r[CONFIG.colTown]   || '').trim(),
+      county:   String(r[CONFIG.colCounty] || '').trim(),
+      postcode,
+      lat: null,
+      lng: null,
+    };
+    if (isValidPostcode(postcode)) postcodes.add(postcode);
+  }
+
+  // Only geocode the postcodes needed for the visible week, not the entire workbook.
+  const pcCoords = await resolvePostcodesBulk([...postcodes]);
+  for (const num in out) {
+    const pc = out[num].postcode;
+    const key = pc.replace(/\s+/g, '').toUpperCase();
+    if (pcCoords[key]) {
+      out[num].lat = pcCoords[key].lat;
+      out[num].lng = pcCoords[key].lng;
+    }
+    projectLookup[num] = out[num];
+  }
+
+  await saveProjectLocationsToCache(Object.values(out));
+  return out;
+}
+
+async function ensureProjectLookupForEvents(events) {
+  const needed = getNeededProjectNos(events);
+  if (!needed.length) return projectLookup;
+
+  setLoading('Loading current week locations…', true);
+  try {
+    let missing = needed.filter(n => {
+      const loc = projectLookup[n];
+      return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
+    });
+
+    if (missing.length) {
+      console.log('Project locations missing from cache; checking workbook:', missing);
+      await lookupMissingProjectsFromWorkbook(missing);
+    }
+
+    events.forEach(e => enrichEventFromLookup(e, projectLookup));
+    return projectLookup;
+  } finally {
+    setLoading('Loading current week locations…', false);
+  }
+}
+
+// Backwards-compatible wrapper used by map search. It now warms the SharePoint
+// cache first and only loads workbook rows if the user searches for a project
+// that is not already cached.
+async function ensureProjectLookup() {
+  return projectLookup;
 }
 
 function isValidPostcode(pc) {
@@ -2082,10 +2187,10 @@ async function fetchOneStaffCalendar(staff, startISO, endISO) {
           title:     ev.subject || '',
           type:      eventType,
           projectNo: projNo,
-      vehicle: extractVehicleName(ev.categories || []),
+          vehicle: extractVehicleName(ev.categories || []),
           isAllDay:  !!ev.isAllDay,
           site: '', town: '', county: '', postcode: '',
-          lat: NaN, lng: NaN, vehicle: '',
+          lat: NaN, lng: NaN,
           _projInLookup: false, _hasPostcode: false, _hasValidPostcode: false,
         };
       })
@@ -2119,33 +2224,46 @@ function logCalendarDebug(events) {
   console.groupEnd();
 }
 
+let _loadedWeekEvents = {};  // week key yyyy-mm-dd -> event[]
+
+function getWeekKey(ws = currentWeekStart) {
+  return fmtDateLocal(getWeekStart(ws));
+}
+
 async function fetchAllStaffCalendars(forceRefresh = false) {
-  if (_eventsCacheReady && !forceRefresh) return allEvents;
+  const weekStart = getWeekStart(currentWeekStart);
+  const weekEnd = getWeekEnd(weekStart);
+  const weekKey = getWeekKey(weekStart);
+
+  if (_loadedWeekEvents[weekKey] && !forceRefresh) {
+    allEvents = Object.values(_loadedWeekEvents).flat();
+    return allEvents;
+  }
+
   _failedMailboxes = new Set();
+  const startISO = weekStart.toISOString().split('.')[0] + 'Z';
+  const endForGraph = new Date(weekEnd);
+  endForGraph.setDate(endForGraph.getDate() + 1); // Graph calendarView end is safest as exclusive next-day boundary
+  const endISO = endForGraph.toISOString().split('.')[0] + 'Z';
 
-  // Window: 7 days behind to 120 days ahead — same as the old PowerShell sync
-  const start = new Date(); start.setDate(start.getDate() - 7);
-  const end   = new Date(); end.setDate(end.getDate() + 120);
-  const startISO = start.toISOString().split('.')[0] + 'Z';
-  const endISO   = end.toISOString().split('.')[0] + 'Z';
-
-  setLoading('Loading staff calendars…', true);
+  setLoading('Loading this week’s staff calendars…', true);
   try {
-    // Fetch all calendars in parallel
+    // Fetch this week only. This makes first open much faster than the old
+    // 7-days-back-to-120-days-forward calendar window.
     const results = await Promise.all(
       staffList.map(s => fetchOneStaffCalendar(s, startISO, endISO))
     );
     const collected = results.flat();
 
-    // Enrich with project workbook data (uses whatever's loaded; may be empty)
-    const lookup = projectLookup || {};
-    collected.forEach(e => enrichEventFromLookup(e, lookup));
+    // Resolve only the project locations needed for this loaded week.
+    await ensureProjectLookupForEvents(collected);
 
-    // Attach vehicles
-    const vehicles = await fetchVehicleBookings();
+    // Attach vehicles for the same week window.
+    const vehicles = await fetchVehicleBookings(weekStart, endForGraph);
     attachVehicles(collected, vehicles);
 
-    allEvents = collected;
+    _loadedWeekEvents[weekKey] = collected;
+    allEvents = Object.values(_loadedWeekEvents).flat();
     _eventsCacheReady = true;
     logCalendarDebug(allEvents);
 
@@ -2155,7 +2273,7 @@ async function fetchAllStaffCalendars(forceRefresh = false) {
     }
     return allEvents;
   } finally {
-    setLoading('Loading staff calendars…', false);
+    setLoading('Loading this week’s staff calendars…', false);
   }
 }
 
@@ -2172,25 +2290,18 @@ function enrichEventFromLookup(e, lookup) {
 }
 
 async function fetchSharePointData() {
-  // Function name kept for backward compatibility — actually reads from Graph now.
-  const events = await fetchAllStaffCalendars();
-
-  // If the project lookup wasn't ready when we mapped, refresh map data once it loads
-  if (!projectLookup) {
-    ensureProjectLookup().then(newLookup => {
-      allEvents.forEach(e => enrichEventFromLookup(e, newLookup));
-      fetchVehicleBookings().then(v => {
-        attachVehicles(allEvents, v);
-        renderAll();
-      });
-      showNotification('Locations loaded', 'ok');
-    }).catch(e => console.error('Background workbook load failed', e));
-  }
-  return events;
+  // Function name kept for backward compatibility — actually reads staff calendars
+  // directly from Graph and resolves only the current week's locations.
+  return await fetchAllStaffCalendars();
 }
 
 async function refreshCalendars() {
   _eventsCacheReady = false;
+  _loadedWeekEvents = {};
+  _spLocationCacheLoaded = false;
+  _spLocationCacheByProject = {};
+  _vehicleBookingsByWeek = {};
+  projectLookup = {};
   await loadData();
   showNotification('Calendars refreshed', 'ok');
 }
@@ -2228,37 +2339,35 @@ function extractProjectNo(str) {
 }
 
 // ── Vehicle bookings (read directly from Outlook via Graph) ───
-let _vehicleBookings = null;
-async function fetchVehicleBookings() {
-  if (_vehicleBookings !== null) return _vehicleBookings;
+let _vehicleBookingsByWeek = {};  // week key -> booking[]
+async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), endDate = getWeekEnd(currentWeekStart)) {
+  const weekKey = getWeekKey(startDate);
+  if (_vehicleBookingsByWeek[weekKey]) return _vehicleBookingsByWeek[weekKey];
   try {
-    // Same window we use for events: -7 days to +120 days
-    const start = new Date(); start.setDate(start.getDate() - 7);
-    const end   = new Date(); end.setDate(end.getDate() + 120);
-    const startISO = start.toISOString().split('.')[0] + 'Z';
-    const endISO   = end.toISOString().split('.')[0] + 'Z';
+    const startISO = startDate.toISOString().split('.')[0] + 'Z';
+    const endForGraph = new Date(endDate);
+    endForGraph.setDate(endForGraph.getDate() + 1);
+    const endISO = endForGraph.toISOString().split('.')[0] + 'Z';
     const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
-    const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,isAllDay`;
-    const data = await graphFetch(path);
-    if (!data || !data.value) { _vehicleBookings = []; return _vehicleBookings; }
-    _vehicleBookings = data.value.map(ev => {
-      // Vehicle name = first whitespace-delimited token of subject
+    const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
+    const data = await graphFetchPaged(path);
+    const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
-      const firstToken = subject.split(/\s+/)[0] || '';
-      const vehicle = firstToken.replace(/[^\w-]/g, '');
+      const vehicleFromCategory = extractVehicleName(ev.categories || []);
+      const fallbackVehicle = (subject.split(/\s+/)[0] || '').replace(/[^\w-]/g, '');
       return {
         title:   subject,
-        vehicle: vehicle,
+        vehicle: vehicleFromCategory || fallbackVehicle,
         start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
         end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
-    return _vehicleBookings;
+    _vehicleBookingsByWeek[weekKey] = bookings;
+    return bookings;
   } catch(e) {
-    // Mailbox not accessible / not shared — silent fallback
     console.warn('Vehicle bookings unavailable:', e.message);
-    _vehicleBookings = [];
-    return _vehicleBookings;
+    _vehicleBookingsByWeek[weekKey] = [];
+    return _vehicleBookingsByWeek[weekKey];
   }
 }
 
@@ -2280,7 +2389,6 @@ function attachVehicles(events, bookings) {
     const eventDate = new Date(e.date);
     if (isNaN(eventDate)) return;
     const initials = initialsForName(e.person);
-    // Window: booking can start up to 1 day before event and end up to 1 day after
     const dayMs = 86400000;
     const evDayStart = new Date(eventDate); evDayStart.setHours(0,0,0,0);
     const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23,59,59,999);
@@ -2289,7 +2397,6 @@ function attachVehicles(events, bookings) {
       (b.start.getTime() - dayMs) <= evDayEnd.getTime()
     );
     if (!matchable.length) return;
-    // Prefer one whose title contains the staff initials as a token
     const initialMatch = matchable.find(b => {
       const upper = b.title.toUpperCase();
       return initials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
@@ -3422,20 +3529,27 @@ function renderGrid() {
   container.innerHTML = html;
 }
 
-function changeWeek(dir) {
+async function changeWeek(dir) {
   const d = new Date(currentWeekStart);
   d.setDate(d.getDate() + dir * 7);
   currentWeekStart = d;
   dayFilter = null;   // reset day filter on week change
   updateWeekLabel();
-  // Events are cached across the whole window, so just re-filter and render
+  if (CONFIG.useLiveData) {
+    await fetchAllStaffCalendars(false);
+    buildStaffFilter();
+  }
   renderAll();
 }
 
-function goToThisWeek() {
+async function goToThisWeek() {
   currentWeekStart = getWeekStart(new Date());
   dayFilter = null;
   updateWeekLabel();
+  if (CONFIG.useLiveData) {
+    await fetchAllStaffCalendars(false);
+    buildStaffFilter();
+  }
   renderAll();
 }
 
