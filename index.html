@@ -1613,6 +1613,18 @@ function extractVehicleName(categories = []) {
 
 
 
+
+function startLoadingSafetyTimer() {
+  setTimeout(() => {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+      console.warn('Startup loading safety timer hid the overlay; background refresh may still be running.');
+      showLoading(false);
+      setSubLoadingMessage('Still refreshing live data in background…');
+    }
+  }, 8000);
+}
+
 function setMainLoadingMessage(message) {
   const el = document.querySelector('#loadingOverlay .loading-text');
   if (el) el.textContent = message || 'Loading calendar data…';
@@ -2001,6 +2013,7 @@ function selectAllStaff() {
 // ═══════════════════════════════════════════════════════════
 async function loadData() {
   showLoading(true);
+  startLoadingSafetyTimer();
   setMainLoadingMessage(CONFIG.cacheFirstLoad ? 'Loading cached calendar data…' : 'Loading calendar data…');
   try {
     if (CONFIG.useLiveData) {
@@ -2014,7 +2027,7 @@ async function loadData() {
     renderAll();
 
     // Calendar is now usable immediately. Resolve locations afterwards.
-    showNotification(CONFIG.cacheFirstLoad ? 'Cached data loaded — refreshing live data in background' : 'Calendar loaded — resolving current week locations', 'ok');
+    showNotification(CONFIG.cacheFirstLoad ? 'Opening cached view — refreshing live data in background' : 'Calendar loaded — resolving current week locations', 'ok');
     if (!CONFIG.cacheFirstLoad) {
       resolveCurrentWeekLocationsInBackground(filteredEvents.length ? filteredEvents : allEvents);
     }
@@ -2428,16 +2441,21 @@ async function fetchWonProjectsCache() {
 }
 
 async function fetchCalendarCacheFromSharePoint() {
-  const listId = await getListId(CONFIG.calendarListName);
-  const data = await graphFetchPaged(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=5000`);
-  const items = data.value || [];
+  try {
+    const listId = await getListId(CONFIG.calendarListName);
+    const data = await graphFetchPaged(`/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=5000`);
+    const items = data.value || [];
 
-  const events = items
-    .map(item => mapEventItem(item, projectLookup))
-    .filter(e => e.date && eventFallsInCurrentWeek(e));
+    const events = items
+      .map(item => mapEventItem(item, projectLookup))
+      .filter(e => e.date && eventFallsInCurrentWeek(e));
 
-  console.log(`Loaded ${events.length} cached event(s) from ${CONFIG.calendarListName}`);
-  return events;
+    console.log(`Loaded ${events.length} cached event(s) from ${CONFIG.calendarListName}`);
+    return events;
+  } catch (e) {
+    console.warn('StaffCalendarCache unavailable:', e.message);
+    return [];
+  }
 }
 
 async function fetchCachedDataFirst() {
@@ -2448,8 +2466,6 @@ async function fetchCachedDataFirst() {
     await fetchWonProjectsCache();
     const cachedEvents = await fetchCalendarCacheFromSharePoint();
 
-    // Vehicle assignment from cache is included if the list has Vehicle field,
-    // otherwise it will be added by the background refresh.
     cachedEvents.forEach(e => enrichEventFromLookup(e, projectLookup));
 
     const weekKey = getWeekKey(currentWeekStart);
@@ -2457,6 +2473,12 @@ async function fetchCachedDataFirst() {
     allEvents = Object.values(_loadedWeekEvents).flat();
     _eventsCacheReady = true;
     return cachedEvents;
+  } catch (e) {
+    console.warn('Cache read failed:', e.message);
+    const weekKey = getWeekKey(currentWeekStart);
+    _loadedWeekEvents[weekKey] = [];
+    allEvents = Object.values(_loadedWeekEvents).flat();
+    return [];
   } finally {
     setLoading('Reading SharePoint cache…', false);
   }
@@ -2567,23 +2589,21 @@ async function refreshFromLiveSourcesInBackground() {
 }
 
 async function fetchSharePointData() {
-  // Cache-first: return SharePoint list data immediately where available.
-  // Then refresh Outlook/workbook in the background and re-render.
+  // Cache-first: never block initial rendering on Outlook/workbook calls.
   if (CONFIG.cacheFirstLoad) {
     try {
       const cached = await fetchCachedDataFirst();
-      if (cached && cached.length) {
-        setTimeout(() => refreshFromLiveSourcesInBackground(), 50);
-        return allEvents;
-      }
+      setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
+      return allEvents; // may be empty, but the app/map can render immediately
     } catch (e) {
-      console.warn('Cache-first load failed; falling back to live calendar fetch:', e.message);
+      console.warn('Cache-first load failed; rendering empty app and refreshing live in background:', e.message);
+      allEvents = [];
+      setTimeout(() => refreshFromLiveSourcesInBackground(), 100);
+      return allEvents;
     }
   }
 
-  const live = await fetchAllStaffCalendars();
-  setTimeout(() => refreshFromLiveSourcesInBackground(), 50);
-  return live;
+  return await fetchAllStaffCalendars();
 }
 
 async function refreshCalendars() {
