@@ -2176,19 +2176,33 @@ async function lookupMissingProjectsFromWorkbook(projectNos) {
   return out;
 }
 
-async function ensureProjectLookupForEvents(events) {
+async function ensureProjectLookupForEvents(events, forceRefresh = false) {
   const needed = getNeededProjectNos(events);
   if (!needed.length) return projectLookup;
 
   setLoading('Loading current week locations…', true);
   try {
-    let missing = needed.filter(n => {
-      const loc = projectLookup[n];
-      return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
-    });
+    // On a forced live refresh, clear the in-memory workbook cache so changed
+    // postcodes in the Excel file are picked up fresh from the Graph API.
+    if (forceRefresh) {
+      _workbookRowsCache = null;
+      _workbookLoading = null;
+    }
+
+    // Always re-fetch from workbook on a force refresh; otherwise only fetch
+    // projects that are genuinely missing coordinates.
+    let missing = forceRefresh
+      ? needed
+      : needed.filter(n => {
+          const loc = projectLookup[n];
+          return !loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng));
+        });
 
     if (missing.length) {
-      console.log('Project locations missing from cache; checking workbook:', missing);
+      console.log(
+        forceRefresh ? 'Live refresh: re-reading workbook for projects:' : 'Project locations missing from cache; checking workbook:',
+        missing
+      );
       await lookupMissingProjectsFromWorkbook(missing);
     }
 
@@ -2414,12 +2428,17 @@ async function fetchWonProjectsCache() {
       const projectNo = normaliseProjectNo(f.Title || f.ProjectNumber || '');
       if (!projectNo) return;
 
+      // SharePoint replaces spaces in column names with _x0020_ internally.
+      // "Nearest Postcode" becomes "Nearest_x0020_Postcode" in the Graph API.
+      const postcode = String(
+        f['Nearest_x0020_Postcode'] || f.Postcode || f.PostCode || ''
+      ).trim();
       projectLookup[projectNo] = {
         projectNo,
         site:     String(f.Site || f.ProjectName || f.SiteName || '').trim(),
         town:     String(f.Town || '').trim(),
         county:   String(f.County || '').trim(),
-        postcode: String(f.Postcode || f.PostCode || '').trim(),
+        postcode,
         lat:      f.Latitude  != null && f.Latitude  !== '' ? Number(f.Latitude)  : null,
         lng:      f.Longitude != null && f.Longitude !== '' ? Number(f.Longitude) : null,
       };
@@ -2480,7 +2499,7 @@ async function refreshFromLiveSourcesInBackground() {
   setLoading('Refreshing live data in background…', true);
   try {
     const freshEvents = await fetchAllStaffCalendars(true);
-    await ensureProjectLookupForEvents(freshEvents);
+    await ensureProjectLookupForEvents(freshEvents, true);
     freshEvents.forEach(e => enrichEventFromLookup(e, projectLookup));
 
     const weekKey = getWeekKey(currentWeekStart);
@@ -2506,14 +2525,12 @@ async function refreshFromLiveSourcesInBackground() {
 }
 
 // ── Cache write-back ────────────────────────────────────────
-// Writes live Outlook events back to StaffCalendarCache so the next page load
-// can show them instantly without waiting for Outlook.
+// Writes live Outlook events to StaffCalendarCache (upsert by OutlookEventId).
 async function upsertCalendarCacheItems(events) {
   try {
     const listId = await getListId(CONFIG.calendarListName);
     const now = new Date().toISOString();
 
-    // Fetch existing items so we can update rather than duplicate.
     const existing = await graphFetchPaged(
       `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
     );
@@ -2540,12 +2557,11 @@ async function upsertCalendarCacheItems(events) {
         OutlookEventId: String(e.outlookEventId || e.id || ''),
         LastSynced:     now,
       };
-      const outlookId = fields.OutlookEventId;
+      const oid = fields.OutlookEventId;
       try {
-        if (outlookId && existingByOutlookId[outlookId]) {
-          // Update existing row.
+        if (oid && existingByOutlookId[oid]) {
           await graphPatch(
-            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByOutlookId[outlookId]}/fields`,
+            `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items/${existingByOutlookId[oid]}/fields`,
             fields
           );
         } else {
@@ -2555,22 +2571,22 @@ async function upsertCalendarCacheItems(events) {
           );
         }
       } catch (inner) {
-        console.warn('StaffCalendarCache write failed for event:', inner.message, fields.Title);
+        console.warn('StaffCalendarCache write failed:', inner.message, fields.Title);
       }
     }
-    console.log(`StaffCalendarCache updated: ${events.length} event(s)`);
+    console.log(`StaffCalendarCache updated: ${(events || []).length} event(s)`);
   } catch (e) {
     console.warn('StaffCalendarCache update skipped:', e.message);
   }
 }
 
-// Writes resolved project locations back to WonProjectsCache so lat/lng are
-// available on the next cache-first load without hitting the workbook.
+// Writes resolved project locations to WonProjectsCache (upsert by project number).
+// Also stores the geocoded lat/lng and the postcode so future cache-first loads
+// can skip the workbook entirely.
 async function upsertWonProjectsCacheItems(events) {
   try {
     const listId = await getListId(CONFIG.projectLocationCacheListName);
 
-    // Fetch existing items keyed by project number (stored in Title field).
     const existing = await graphFetchPaged(
       `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$select=id,fields&$top=5000`
     );
@@ -2588,14 +2604,15 @@ async function upsertWonProjectsCacheItems(events) {
       const loc = projectLookup[e.projectNo];
       if (!loc) continue;
       const fields = {
-        Title:         String(e.projectNo),
-        ProjectNumber: String(e.projectNo),
-        Site:          String(loc.site || ''),
-        Town:          String(loc.town || ''),
-        County:        String(loc.county || ''),
-        Postcode:      String(loc.postcode || ''),
-        Latitude:      loc.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
-        Longitude:     loc.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
+        Title:                     String(e.projectNo),
+        ProjectNumber:             String(e.projectNo),
+        Site:                      String(loc.site || ''),
+        Town:                      String(loc.town || ''),
+        County:                    String(loc.county || ''),
+        // Write postcode back to the same column name the list uses.
+        'Nearest_x0020_Postcode':  String(loc.postcode || ''),
+        Latitude:  loc.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
+        Longitude: loc.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
       };
       try {
         if (existingByProjectNo[e.projectNo]) {
@@ -2610,7 +2627,7 @@ async function upsertWonProjectsCacheItems(events) {
           );
         }
       } catch (inner) {
-        console.warn('WonProjectsCache write failed for project:', inner.message, e.projectNo);
+        console.warn('WonProjectsCache write failed:', inner.message, e.projectNo);
       }
     }
     console.log(`WonProjectsCache updated: ${seen.size} project(s)`);
@@ -2737,7 +2754,7 @@ function initialsForName(name) {
 function attachVehicles(events, bookings) {
   if (!bookings || !bookings.length) return;
 
-  // Clear any existing vehicle assignments on survey events first.
+  // Clear any previous vehicle assignments on survey events.
   events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
 
   // Group survey events by project+date so people travelling together share
@@ -2745,7 +2762,7 @@ function attachVehicles(events, bookings) {
   const groups = new Map();
   events.forEach(e => {
     if (!isSurveyType(e.type) || !e.date) return;
-    const projKey = e.projectNo || `${(e.lat||'')},${(e.lng||'')}` || e.title;
+    const projKey = e.projectNo || `${e.lat || ''},${e.lng || ''}` || e.title;
     const key = `${e.date}|${projKey}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(e);
@@ -2759,39 +2776,34 @@ function attachVehicles(events, bookings) {
     const evDayStart = new Date(eventDate); evDayStart.setHours(0, 0, 0, 0);
     const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23, 59, 59, 999);
 
-    // Bookings that overlap this date at all.
-    const dayBookings = bookings.filter(b =>
-      b.start <= evDayEnd && b.end >= evDayStart
-    );
+    // Bookings that overlap this calendar day.
+    const dayBookings = bookings.filter(b => b.start <= evDayEnd && b.end >= evDayStart);
     if (!dayBookings.length) return;
 
-    // Gather all initials tokens for everyone in the group.
+    // Collect initials tokens for every person in the group.
     const allInitials = group.flatMap(e => initialsForName(e.person));
 
-    // 1. Prefer a booking whose subject mentions any group member's initials.
+    // 1. Initials match — most confident signal; assign to whole group.
     const initialsMatch = dayBookings.find(b => {
       const upper = b.title.toUpperCase();
       return allInitials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
     });
-
     if (initialsMatch) {
-      // Confident match — assign to every member of the group.
       group.forEach(e => { e.vehicle = initialsMatch.vehicle; });
       return;
     }
 
-    // 2. If there is exactly one booking that day, only assign it when there is
-    //    a project-number match in the subject — otherwise leave blank.
+    // 2. Single booking on the day whose subject contains the project number.
     if (dayBookings.length === 1 && e0.projectNo) {
       const projPattern = new RegExp(`\\b0?${e0.projectNo}\\b`);
       if (projPattern.test(dayBookings[0].title)) {
         group.forEach(e => { e.vehicle = dayBookings[0].vehicle; });
       }
-      // No project match → no assignment (staff may be using their own car).
       return;
     }
 
-    // 3. Multiple bookings with no initials/project match → ambiguous, leave blank.
+    // 3. Ambiguous or no confident match → leave vehicle blank.
+    //    Staff may be using their own cars; do not assign a default.
   });
 }
 
