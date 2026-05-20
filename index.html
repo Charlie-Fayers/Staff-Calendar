@@ -2691,7 +2691,7 @@ function mapEventItem(item, lookup) {
     lat,
     lng,
     type:      f.EventType || 'Field survey',
-    vehicle:   f.Vehicle || '',
+    vehicle:   '',
     outlookEventId: f.OutlookEventId || '',
     lastSynced: f.LastSynced || '',
     _projInLookup:    !!enriched,
@@ -2721,16 +2721,20 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
     const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
     const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
     const data = await graphFetchPaged(path);
+
     const bookings = (data && data.value ? data.value : []).map(ev => {
       const subject = ev.subject || '';
       const vehicleFromCategory = extractVehicleName(ev.categories || []);
       return {
-        title:   subject,
-        vehicle: vehicleFromCategory,
-        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
-        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
+        title:     subject,
+        vehicle:   vehicleFromCategory,
+        projectNo: extractProjectNo(subject),
+        initials:  extractInitialsTokens(subject),
+        start:     ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:       ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
+
     _vehicleBookingsByWeek[weekKey] = bookings;
     return bookings;
   } catch(e) {
@@ -2741,6 +2745,41 @@ async function fetchVehicleBookings(startDate = getWeekStart(currentWeekStart), 
 }
 
 // Build the two initials forms for a name: "Charlie Fayers" -> ["CF", "CFA"]
+
+function extractInitialsTokens(str) {
+  // Pull two-to-four letter initials from vehicle booking titles, including
+  // entries such as "Ranger - PK/FB" or "Suzi - Bluefield site (SR)".
+  const tokens = (str || '').toUpperCase().match(/\b[A-Z]{2,4}\b/g) || [];
+  return new Set(tokens);
+}
+
+function staffInitialsMatchBooking(staffName, booking) {
+  const initials = initialsForName(staffName || '').map(i => (i || '').toUpperCase()).filter(Boolean);
+  if (!initials.length || !booking.initials) return false;
+  return initials.some(i => booking.initials.has(i));
+}
+
+function bookingOverlapsEvent(booking, event) {
+  if (!booking || !event) return false;
+
+  // Prefer actual event start/end if present; otherwise use the calendar day.
+  const start = event.startISO ? new Date(event.startISO) : new Date(event.date);
+  const end = event.endISO ? new Date(event.endISO) : new Date(event.date);
+  if (isNaN(start) || isNaN(end)) return false;
+
+  if (!event.startISO) start.setHours(0, 0, 0, 0);
+  if (!event.endISO) end.setHours(23, 59, 59, 999);
+
+  return booking.start <= end && booking.end >= start;
+}
+
+function bookingProjectMatchesEvent(booking, event) {
+  const eventProject = event.projectNo || extractProjectNo(event.title || '');
+  const bookingProject = booking.projectNo || extractProjectNo(booking.title || '');
+  return Boolean(eventProject && bookingProject && eventProject === bookingProject);
+}
+
+
 function initialsForName(name) {
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [parts[0]?.[0]?.toUpperCase() || ''];
@@ -2752,58 +2791,55 @@ function initialsForName(name) {
 }
 
 function attachVehicles(events, bookings) {
+  // Always clear previous/stale assignments before re-matching.
+  events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
   if (!bookings || !bookings.length) return;
 
-  // Clear any previous vehicle assignments on survey events.
-  events.forEach(e => { if (isSurveyType(e.type)) e.vehicle = ''; });
-
-  // Group survey events by project+date so people travelling together share
-  // exactly one vehicle rather than each getting an independent assignment.
+  // Group by project/date so that if a booking is confidently matched to one
+  // attendee on a shared site visit, that same vehicle is shown for the whole
+  // site visit group.
   const groups = new Map();
   events.forEach(e => {
     if (!isSurveyType(e.type) || !e.date) return;
-    const projKey = e.projectNo || `${e.lat || ''},${e.lng || ''}` || e.title;
+    const projKey = e.projectNo || extractProjectNo(e.title || '') || `${e.lat || ''},${e.lng || ''}` || e.title;
     const key = `${e.date}|${projKey}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(e);
   });
 
   groups.forEach(group => {
-    const e0 = group[0];
-    const eventDate = new Date(e0.date);
-    if (isNaN(eventDate)) return;
+    // Only consider vehicle bookings overlapping at least one event in the group.
+    const overlapping = bookings.filter(b => group.some(e => bookingOverlapsEvent(b, e)));
+    if (!overlapping.length) return;
 
-    const evDayStart = new Date(eventDate); evDayStart.setHours(0, 0, 0, 0);
-    const evDayEnd   = new Date(eventDate); evDayEnd.setHours(23, 59, 59, 999);
+    // 1. Best signal: booking initials match one of the staff in this group.
+    // This prevents "SR" being applied to Paul Kennedy just because it is on the same day.
+    const initialMatches = overlapping.filter(b =>
+      group.some(e => staffInitialsMatchBooking(e.person, b))
+    );
 
-    // Bookings that overlap this calendar day.
-    const dayBookings = bookings.filter(b => b.start <= evDayEnd && b.end >= evDayStart);
-    if (!dayBookings.length) return;
-
-    // Collect initials tokens for every person in the group.
-    const allInitials = group.flatMap(e => initialsForName(e.person));
-
-    // 1. Initials match — most confident signal; assign to whole group.
-    const initialsMatch = dayBookings.find(b => {
-      const upper = b.title.toUpperCase();
-      return allInitials.some(i => i && new RegExp(`(^|[^A-Z])${i}([^A-Z]|$)`).test(upper));
-    });
-    if (initialsMatch) {
-      group.forEach(e => { e.vehicle = initialsMatch.vehicle; });
+    const initialVehicles = [...new Set(initialMatches.map(b => b.vehicle).filter(Boolean))];
+    if (initialVehicles.length === 1) {
+      group.forEach(e => { e.vehicle = initialVehicles[0]; });
+      return;
+    }
+    if (initialVehicles.length > 1) {
+      // More than one possible vehicle from initials: do not guess.
       return;
     }
 
-    // 2. Single booking on the day whose subject contains the project number.
-    if (dayBookings.length === 1 && e0.projectNo) {
-      const projPattern = new RegExp(`\\b0?${e0.projectNo}\\b`);
-      if (projPattern.test(dayBookings[0].title)) {
-        group.forEach(e => { e.vehicle = dayBookings[0].vehicle; });
-      }
+    // 2. Fallback only if a project code appears in both the staff event and the vehicle booking.
+    const projectMatches = overlapping.filter(b =>
+      group.some(e => bookingProjectMatchesEvent(b, e))
+    );
+
+    const projectVehicles = [...new Set(projectMatches.map(b => b.vehicle).filter(Boolean))];
+    if (projectVehicles.length === 1) {
+      group.forEach(e => { e.vehicle = projectVehicles[0]; });
       return;
     }
 
-    // 3. Ambiguous or no confident match → leave vehicle blank.
-    //    Staff may be using their own cars; do not assign a default.
+    // 3. Ambiguous/no confident match: leave vehicle blank.
   });
 }
 
