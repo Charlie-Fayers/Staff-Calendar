@@ -1027,23 +1027,25 @@
   /* ── LOADING OVERLAY ── */
   .loading-overlay {
     position: fixed;
-    top: 72px;
-    right: 1rem;
-    inset: auto 1rem auto auto;
-    background: rgba(255,255,255,0.95);
+    left: 12px;
+    bottom: 52px;
+    top: auto;
+    right: auto;
+    width: min(420px, calc(100vw - 24px));
+    background: rgba(255,255,255,0.96);
     border: 1px solid var(--rule);
     border-left: 3px solid var(--sage);
     border-radius: 6px;
-    padding: 0.75rem 1rem;
+    padding: 0.55rem 0.75rem;
     z-index: 9999;
     display: flex;
     flex-direction: row;
     align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
+    justify-content: flex-start;
+    gap: 0.7rem;
     transition: opacity 0.3s, transform 0.3s;
     box-shadow: 0 2px 12px rgba(0,0,0,0.12);
-    pointer-events: none; /* keep the rest of the app usable while loading */
+    pointer-events: none;
   }
   .loading-overlay.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
   .loading-spinner {
@@ -1101,33 +1103,40 @@
 
   /* Small persistent loading badge */
   .loading-badge {
-    position: absolute;
-    bottom: 12px;
+    position: fixed;
     left: 12px;
-    z-index: 800;
-    background: rgba(255, 255, 255, 0.95);
+    bottom: 12px;
+    z-index: 9998;
+    background: rgba(255, 255, 255, 0.96);
     border: 1px solid var(--rule);
-    border-radius: 100px;
-    padding: 0.35rem 0.7rem 0.35rem 0.55rem;
+    border-left: 3px solid var(--clay);
+    border-radius: 6px;
+    padding: 0.45rem 0.75rem;
     font-family: 'DM Mono', monospace;
     font-size: 0.65rem;
     color: var(--text-secondary);
     display: none;
     align-items: center;
     gap: 0.5rem;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.10);
     pointer-events: none;
+    width: min(420px, calc(100vw - 24px));
   }
   .loading-badge.visible { display: inline-flex; }
 
   @media (max-width: 600px) {
     .loading-overlay {
-      top: auto;
+      left: 0.75rem;
+      right: 0.75rem;
+      bottom: 3.4rem;
+      width: auto;
+      justify-content: flex-start;
+    }
+    .loading-badge {
       left: 0.75rem;
       right: 0.75rem;
       bottom: 0.75rem;
       width: auto;
-      justify-content: flex-start;
     }
   }
 
@@ -1551,6 +1560,24 @@ function extractVehicleName(categories = []) {
 }
 
 
+
+function setMainLoadingMessage(message) {
+  const el = document.querySelector('#loadingOverlay .loading-text');
+  if (el) el.textContent = message || 'Loading calendar data…';
+}
+
+function setSubLoadingMessage(message) {
+  const badge = document.getElementById('loadingBadge');
+  const textEl = document.getElementById('loadingBadgeText');
+  if (!badge || !textEl) return;
+  textEl.textContent = message || '';
+  badge.classList.toggle('visible', Boolean(message));
+}
+
+function clearSubLoadingMessage() {
+  setSubLoadingMessage('');
+}
+
 // ═══════════════════════════════════════════════════════════
 // DEMO DATA — replaced by live SharePoint data in production
 // ═══════════════════════════════════════════════════════════
@@ -1621,7 +1648,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMap();
   initMapSearch();
   updateWeekLabel();
-  document.getElementById('loadingOverlay').querySelector('.loading-text').textContent = 'Loading staff list\u2026';
+  setMainLoadingMessage('Loading staff list…');
+  setSubLoadingMessage('Preparing app…');
   showLoading(true);
 
   // If using live data and not signed in yet, trigger login
@@ -1641,6 +1669,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadStaff();
   await loadData();
+  clearSubLoadingMessage();
   loadPointsAndCategories();   // load in background; renders to map when ready
 
   // Re-invalidate map size on viewport changes so it re-tiles correctly
@@ -3620,6 +3649,8 @@ function formatDateShort(dateStr) {
 
 function showLoading(show) {
   document.getElementById('loadingOverlay').classList.toggle('hidden', !show);
+
+  if (!show) clearSubLoadingMessage();
 }
 
 const _loadingTasks = new Set();
