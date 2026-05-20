@@ -1229,6 +1229,7 @@
     <button onclick="setView('grid')" id="btnGrid">Calendar</button>
     <button onclick="setView('table')" id="btnTable">List</button>
   </div>
+  <button id="refreshBtn" onclick="refreshCalendars()" title="Refresh from Outlook" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">↻ Refresh</button>
   <button id="pointsToggle" onclick="togglePointsPanel()" style="font-family:'DM Mono',monospace;font-size:0.65rem;padding:0.25rem 0.65rem;border:1.5px solid var(--rule);background:white;cursor:pointer;letter-spacing:0.04em;border-radius:3px;">◉ Edit Locations</button>
   <div class="filter-label">Staff:</div>
   <div class="staff-filter" id="staffFilter"></div>
@@ -1396,7 +1397,6 @@ const CONFIG = {
   siteId:                'clarksonwoods.sharepoint.com,e4a48d51-cc66-4249-a77a-8140ec2cf009,823cd4e3-cdc8-4537-b0d7-5005a2970cbd',
   staffListName:         'Staff',
   calendarListName:      'StaffCalendarCache',
-  vehiclesListName:      'VehicleBookingsCache',
   pointsListName:        'ManualPoints',
   categoriesListName:    'ManualPointCategories',
 
@@ -1428,7 +1428,7 @@ const msalConfig = {
   },
 };
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-const graphScopes = ['Sites.ReadWrite.All', 'Files.Read.All', 'User.Read'];
+const graphScopes = ['Sites.ReadWrite.All', 'Files.Read.All', 'Calendars.Read.Shared', 'User.Read'];
 
 async function getGraphToken() {
   const accounts = msalInstance.getAllAccounts();
@@ -1990,54 +1990,131 @@ function fmtDateLocal(d) {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
-async function fetchSharePointData() {
-  const ws = fmtDateLocal(currentWeekStart) + 'T00:00:00Z';
-  const we = fmtDateLocal(getWeekEnd(currentWeekStart)) + 'T23:59:59Z';
-  const listId = await getListId(CONFIG.calendarListName);
-  const filter = `fields/EventDate ge '${ws}' and fields/EventDate le '${we}'`;
-  const path = `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999&$filter=${encodeURIComponent(filter)}`;
-  const [data, vehicles] = await Promise.all([
-    graphFetch(path),
-    fetchVehicleBookings(),
-  ]);
-  if (!data) return [];
-  // Use whatever's already in the workbook lookup (may be empty on first run)
-  const lookup = projectLookup || {};
-  const events = data.value.map(item => mapEventItem(item, lookup));
-  // Attach vehicle bookings
-  attachVehicles(events, vehicles);
+// ── Calendar fetch (directly from each staff member's Outlook) ──
+// Session cache — preserved while the page is open. The "Refresh" button clears it.
+let _eventsCacheReady = false;
+let _failedMailboxes = new Set();  // staff we couldn't read for any reason
 
-  // If lookup isn't ready yet, kick it off in background and re-render when it lands
+function classifyEvent(ev) {
+  const cats = ev.categories || [];
+  const subject = (ev.subject || '').trim();
+  if (cats.includes('Field survey'))                    return 'Field survey';
+  if (cats.includes('Field survey (out of hours)'))     return 'Field survey (out of hours)';
+  if (ev.isAllDay && /^office\b/i.test(subject))        return 'Office';
+  if (ev.isAllDay && /^wfh\b/i.test(subject))           return 'WFH';
+  if (ev.isAllDay && cats.some(c => /^A\/L/i.test(c)))  return 'Leave';
+  return null;
+}
+
+async function fetchOneStaffCalendar(staff, startISO, endISO) {
+  const mailbox = encodeURIComponent(staff.email);
+  const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}` +
+               `&$top=999&$select=id,iCalUId,subject,start,end,categories,isAllDay`;
+  try {
+    const data = await graphFetch(path);
+    if (!data || !data.value) return [];
+    return data.value
+      .map(ev => {
+        const eventType = classifyEvent(ev);
+        if (!eventType) return null;
+        const projNo = (eventType.startsWith('Field survey'))
+          ? (extractProjectNo(ev.subject) || '')
+          : '';
+        return {
+          id:        ev.iCalUId || ev.id,
+          person:    staff.name,
+          email:     staff.email,
+          startISO:  ev.start && ev.start.dateTime ? ev.start.dateTime + 'Z' : '',
+          endISO:    ev.end   && ev.end.dateTime   ? ev.end.dateTime   + 'Z' : '',
+          date:      ev.start && ev.start.dateTime ? ev.start.dateTime.split('T')[0] : '',
+          title:     ev.subject || '',
+          type:      eventType,
+          projectNo: projNo,
+          isAllDay:  !!ev.isAllDay,
+          site: '', town: '', county: '', postcode: '',
+          lat: NaN, lng: NaN, vehicle: '',
+          _projInLookup: false, _hasPostcode: false, _hasValidPostcode: false,
+        };
+      })
+      .filter(Boolean);
+  } catch(e) {
+    _failedMailboxes.add(staff.email);
+    return [];
+  }
+}
+
+async function fetchAllStaffCalendars(forceRefresh = false) {
+  if (_eventsCacheReady && !forceRefresh) return allEvents;
+  _failedMailboxes = new Set();
+
+  // Window: 7 days behind to 120 days ahead — same as the old PowerShell sync
+  const start = new Date(); start.setDate(start.getDate() - 7);
+  const end   = new Date(); end.setDate(end.getDate() + 120);
+  const startISO = start.toISOString().split('.')[0] + 'Z';
+  const endISO   = end.toISOString().split('.')[0] + 'Z';
+
+  setLoading('Loading staff calendars…', true);
+  try {
+    // Fetch all calendars in parallel
+    const results = await Promise.all(
+      staffList.map(s => fetchOneStaffCalendar(s, startISO, endISO))
+    );
+    const collected = results.flat();
+
+    // Enrich with project workbook data (uses whatever's loaded; may be empty)
+    const lookup = projectLookup || {};
+    collected.forEach(e => enrichEventFromLookup(e, lookup));
+
+    // Attach vehicles
+    const vehicles = await fetchVehicleBookings();
+    attachVehicles(collected, vehicles);
+
+    allEvents = collected;
+    _eventsCacheReady = true;
+
+    if (_failedMailboxes.size > 0) {
+      console.log('Could not read calendars for:', [..._failedMailboxes]);
+    }
+    return allEvents;
+  } finally {
+    setLoading('Loading staff calendars…', false);
+  }
+}
+
+function enrichEventFromLookup(e, lookup) {
+  if (!e.projectNo || !lookup[e.projectNo]) return;
+  const en = lookup[e.projectNo];
+  e.site = en.site; e.town = en.town; e.county = en.county;
+  e.postcode = en.postcode;
+  if (en.lat != null) e.lat = Number(en.lat);
+  if (en.lng != null) e.lng = Number(en.lng);
+  e._projInLookup = true;
+  e._hasPostcode = !!en.postcode;
+  e._hasValidPostcode = isValidPostcode(en.postcode);
+}
+
+async function fetchSharePointData() {
+  // Function name kept for backward compatibility — actually reads from Graph now.
+  const events = await fetchAllStaffCalendars();
+
+  // If the project lookup wasn't ready when we mapped, refresh map data once it loads
   if (!projectLookup) {
     ensureProjectLookup().then(newLookup => {
-      // Enrich existing events in place
-      [allEvents, surveyEvents, filteredEvents].forEach(arr => {
-        arr.forEach(e => {
-          if (!e.projectNo || !newLookup[e.projectNo]) return;
-          const en = newLookup[e.projectNo];
-          e.site = en.site; e.town = en.town; e.county = en.county;
-          e.postcode = en.postcode;
-          if (en.lat != null) e.lat = Number(en.lat);
-          if (en.lng != null) e.lng = Number(en.lng);
-          e._projInLookup = true;
-          e._hasPostcode = !!en.postcode;
-          e._hasValidPostcode = isValidPostcode(en.postcode);
-        });
-      });
-      // Re-run vehicle matching (vehicles may have loaded async too)
+      allEvents.forEach(e => enrichEventFromLookup(e, newLookup));
       fetchVehicleBookings().then(v => {
         attachVehicles(allEvents, v);
-        attachVehicles(surveyEvents, v);
-        attachVehicles(filteredEvents, v);
-        renderSidebar();
-        renderMap();
-        renderTable();
-        if (currentView === 'grid') renderGrid();
+        renderAll();
       });
       showNotification('Locations loaded', 'ok');
     }).catch(e => console.error('Background workbook load failed', e));
   }
   return events;
+}
+
+async function refreshCalendars() {
+  _eventsCacheReady = false;
+  await loadData();
+  showNotification('Calendars refreshed', 'ok');
 }
 
 function mapEventItem(item, lookup) {
@@ -2072,29 +2149,35 @@ function extractProjectNo(str) {
   return m ? m[1] : null;
 }
 
-// ── Vehicle bookings ───────────────────────────────────────
+// ── Vehicle bookings (read directly from Outlook via Graph) ───
 let _vehicleBookings = null;
 async function fetchVehicleBookings() {
-  // One-off per session (whole window is small)
   if (_vehicleBookings !== null) return _vehicleBookings;
   try {
-    // Pull a wide window — same as the calendar sync, default 120 days
-    const listId = await getListId(CONFIG.vehiclesListName);
-    const data = await graphFetch(
-      `/sites/${encodeURIComponent(CONFIG.siteId)}/lists/${listId}/items?$expand=fields&$top=999`);
-    if (!data) { _vehicleBookings = []; return _vehicleBookings; }
-    _vehicleBookings = data.value.map(it => {
-      const f = it.fields || {};
+    // Same window we use for events: -7 days to +120 days
+    const start = new Date(); start.setDate(start.getDate() - 7);
+    const end   = new Date(); end.setDate(end.getDate() + 120);
+    const startISO = start.toISOString().split('.')[0] + 'Z';
+    const endISO   = end.toISOString().split('.')[0] + 'Z';
+    const mailbox  = encodeURIComponent('Vehicles@clarksonwoods.co.uk');
+    const path = `/users/${mailbox}/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=999&$select=id,iCalUId,subject,start,end,isAllDay`;
+    const data = await graphFetch(path);
+    if (!data || !data.value) { _vehicleBookings = []; return _vehicleBookings; }
+    _vehicleBookings = data.value.map(ev => {
+      // Vehicle name = first whitespace-delimited token of subject
+      const subject = ev.subject || '';
+      const firstToken = subject.split(/\s+/)[0] || '';
+      const vehicle = firstToken.replace(/[^\w-]/g, '');
       return {
-        title:   f.Title || '',
-        vehicle: f.VehicleName || '',
-        start:   f.StartDate ? new Date(f.StartDate) : null,
-        end:     f.EndDate   ? new Date(f.EndDate)   : null,
+        title:   subject,
+        vehicle: vehicle,
+        start:   ev.start && ev.start.dateTime ? new Date(ev.start.dateTime + 'Z') : null,
+        end:     ev.end   && ev.end.dateTime   ? new Date(ev.end.dateTime + 'Z')   : null,
       };
     }).filter(b => b.start && b.end && b.vehicle);
     return _vehicleBookings;
   } catch(e) {
-    // List may not exist yet — fail silently
+    // Mailbox not accessible / not shared — silent fallback
     console.warn('Vehicle bookings unavailable:', e.message);
     _vehicleBookings = [];
     return _vehicleBookings;
@@ -3266,22 +3349,15 @@ function changeWeek(dir) {
   currentWeekStart = d;
   dayFilter = null;   // reset day filter on week change
   updateWeekLabel();
-  if (CONFIG.useLiveData) {
-    loadData();
-  } else {
-    renderAll();
-  }
+  // Events are cached across the whole window, so just re-filter and render
+  renderAll();
 }
 
 function goToThisWeek() {
   currentWeekStart = getWeekStart(new Date());
   dayFilter = null;
   updateWeekLabel();
-  if (CONFIG.useLiveData) {
-    loadData();
-  } else {
-    renderAll();
-  }
+  renderAll();
 }
 
 // ═══════════════════════════════════════════════════════════
